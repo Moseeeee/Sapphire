@@ -1,0 +1,33 @@
+2025-12-18 19:58:25,968 - INFO - handlers.BotAutomaticWork.Middleware.RPS.BotRPSManager - 📊 Менеджер RPS статистики инициализирован
+2025-12-18 21:33:58,342 - INFO - handlers.BotAutomaticWork.Middleware.BotDetailedStats - 📊 Создана детальная статистика для бота: Sapphire | Chat Manager
+2025-12-18 21:33:58,342 - INFO - handlers.BotAutomaticWork.Middleware.BotDetailedStats - 📊 Создана статистика для бота bot_1
+2025-12-18 21:33:58,342 - INFO - handlers.BotAutomaticWork.Middleware.BotDetailedStats - 📊 Создана детальная статистика для бота: Sapphire Test Bot
+2025-12-18 21:33:58,342 - INFO - handlers.BotAutomaticWork.Middleware.BotDetailedStats - 📊 Создана статистика для бота bot_2
+2025-12-18 21:33:58,343 - INFO - handlers.BotAutomaticWork.Middleware.BotDetailedStats - 📊 Менеджер детальной статистики ботов инициализирован
+2025-12-18 23:22:26,235 - INFO - handlers.BotAutomaticWork.Middleware.RPS.BotRPSManager - 📊 Менеджер расширенной статистики ботов инициализирован
+2025-12-21 21:30:06,478 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
+2025-12-21 21:30:06,489 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: 💎 Sapphire | Chat Manager (bot_1)
+2025-12-21 21:30:06,496 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: 🛠️ Sapphire Test Bot (bot_2)
+2025-12-21 21:30:06,496 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'
+2025-12-21 21:45:56,923 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
+2025-12-21 21:45:56,930 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: 💎 Sapphire | Chat Manager (bot_1)
+2025-12-21 21:45:56,937 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: 🛠️ Sapphire Test Bot (bot_2)
+2025-12-21 21:45:56,937 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'
+2025-12-21 21:47:44,905 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
+2025-12-21 21:47:44,912 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: 💎 Sapphire | Chat Manager (bot_1)
+2025-12-21 21:47:44,921 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: 🛠️ Sapphire Test Bot (bot_2)
+2025-12-21 21:47:44,921 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'
+2025-12-21 21:54:48,388 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
+2025-12-21 21:54:48,396 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: 💎 Sapphire | Chat Manager (bot_1)
+2025-12-21 21:54:48,403 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: 🛠️ Sapphire Test Bot (bot_2)
+2025-12-21 21:54:48,403 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'
+2025-12-31 15:34:41,312 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
+2025-12-31 15:34:41,322 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: 💎 Sapphire | Chat Manager (bot_1)
+2025-12-31 15:34:41,328 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: 👁️‍🗨️ Sanor Test Bot (bot_3)
+2025-12-31 15:34:41,329 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'
+2026-01-03 21:14:32,259 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
+2026-01-03 21:14:32,268 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: Sapphire | Chat Manager (bot_1)
+2026-01-03 21:14:32,268 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'
+2026-01-03 21:14:54,843 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
+2026-01-03 21:14:54,860 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: Sapphire | Chat Manager (bot_1)
+2026-01-03 21:14:54,860 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'

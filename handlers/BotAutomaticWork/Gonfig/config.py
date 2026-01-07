@@ -1,0 +1,6 @@
+#TOKEN = '8277713159:AAHUN9FtoPX02G2bNaOUb3HMRuE4LcZRYbY'
+DATABASE_URL = "postgresql://postgres:mose_596@localhost:5432/sup"
+error_channel = '-1002271583121'
+sanor_ID = 6282374712
+boss_agent = [6282374712, 7530158798,] #7708873356]
+AGENT_CHAT_ID_CheckTextApprovals = -1003469470290
