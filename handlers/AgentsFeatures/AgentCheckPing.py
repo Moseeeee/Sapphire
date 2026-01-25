@@ -1,15 +1,29 @@
+import time
+
 from aiogram import Router, F
 from aiogram.types import *
 from datetime import datetime
-
-from handlers.AgentsFeatures.server_info import get_db_ping_ms
-from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 import logging, asyncio
-from handlers.BotAutomaticWork.universal_bot import bot
-from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_agent_access
+
+from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 
 pingin = Router()
 logger = logging.getLogger(__name__)
+
+
+async def get_db_ping_ms():
+    """Измеряет пинг к БД (время ответа SELECT 1)"""
+    pool = get_db_pool()
+    start = time.time()
+    try:
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+    except Exception as e:
+        logger.error(f"❌ Ошибка пинга БД: {e}")
+        return -1  # или float('inf')
+    db_ping = (time.time() - start) * 1000
+    return f"{db_ping:.0f}"
+
 
 
 async def process_ping_command(message: Message, command_type: str):

@@ -1,4 +1,3 @@
-# handlers/BotAutomaticWork/Middleware/BotChatStatsService.py
 import asyncio
 import logging
 from typing import Dict

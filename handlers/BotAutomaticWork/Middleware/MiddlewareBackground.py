@@ -5,10 +5,8 @@ import time
 import hashlib
 from datetime import datetime
 from typing import Dict, Any
-
 import pytz
 from aiogram.enums import ChatMemberStatus
-
 from handlers.BotAutomaticWork.BotCreatedGlobal import get_bot
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 from handlers.BotAutomaticWork.Middleware.MiddlewareCache import update_ignore_cache
@@ -16,7 +14,6 @@ from handlers.BotAutomaticWork.Middleware.MiddlewareMultiBot.SuperBotLoadEstimat
 
 logger = logging.getLogger(__name__)
 MOSCOW_TZ = pytz.timezone('Europe/Moscow')
-
 _THE_BOT = get_bot()
 
 # === ОЧЕРЕДИ И ТРЕКИНГИ ПО БОТАМ ===
@@ -36,12 +33,11 @@ def _ensure_bot_queue(bot_id: str):
 
 
 async def enqueue_user_update(data: dict, bot_id: str):
-    """Добавить данные в очередь конкретного бота (теперь асинхронная функция)"""
+    """Добавить данные в очередь конкретного бота"""
     _ensure_bot_queue(bot_id)
 
     # Проверяем, запущен ли воркер для этого бота
     if bot_id not in _WORKER_TASKS or _WORKER_TASKS[bot_id].done():
-        #logger.warning(f"⚠️ Worker not running for bot {bot_id}, starting it now")
         pool = get_db_pool()
         _WORKER_TASKS[bot_id] = asyncio.create_task(_worker_for_bot(bot_id, _QUEUES[bot_id], pool))
 
@@ -57,12 +53,10 @@ async def enqueue_user_update(data: dict, bot_id: str):
 
         # Пробуем добавить в очередь
         _QUEUES[bot_id].put_nowait(data)
-        #logger.debug(f"📥 [{bot_id}] Enqueued update for user: {data.get('user_id')}, queue size: {queue_size + 1}")
 
         # === НОВОЕ: запись API вызова ===
         metrics = super_bot_load_estimator._get_metrics(bot_id)
         metrics.record_api_call()
-
     except asyncio.QueueFull:
         logger.error(f"❌ [{bot_id}] Queue is full! Dropping update for user: {data.get('user_id')}")
         try:
@@ -71,7 +65,6 @@ async def enqueue_user_update(data: dict, bot_id: str):
             _QUEUES[bot_id].task_done()
             # Пробуем снова
             _QUEUES[bot_id].put_nowait(data)
-            #logger.info(f"✅ [{bot_id}] Made space in queue, added update for user: {data.get('user_id')}")
         except Exception as e:
             logger.error(f"❌ [{bot_id}] Failed to make space in queue: {e}")
 
@@ -79,14 +72,11 @@ async def enqueue_user_update(data: dict, bot_id: str):
 async def _worker_for_bot(bot_id: str, queue: asyncio.Queue, pool):
     """Воркер для обработки очереди конкретного бота"""
     batch_size = 100
-
     logger.info(f"🔄 Worker started for bot {bot_id}")
-
     while True:
         try:
             data = await queue.get()
             batch = [data]
-
             # Пытаемся набрать пакет
             try:
                 while len(batch) < batch_size and not queue.empty():
@@ -109,7 +99,6 @@ async def _worker_for_bot(bot_id: str, queue: asyncio.Queue, pool):
 
             for _ in batch:
                 queue.task_done()
-
         except asyncio.CancelledError:
             logger.info(f"🛑 Worker for {bot_id} cancelled")
             break
@@ -148,22 +137,21 @@ async def _process_single(conn, data: dict):
             logger.debug(f"  Skipping already processed ChatMemberUpdate for user {user_id}")
             return
 
-        #logger.debug(f"📦 Processing user update: user_id={user_id}")
-
         # === НОВОЕ: замер времени БД ===
         db_start = time.time()
+
         # Обновление пользователя
         now = datetime.now(MOSCOW_TZ)
         now_iso = now.isoformat()
 
         # Вставляем или обновляем пользователя
         await conn.execute('''
-            INSERT INTO users (user_id, name, username, first_seen, last_activity)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (user_id) DO UPDATE SET
-                name = EXCLUDED.name,
-                username = EXCLUDED.username,
-                last_activity = EXCLUDED.last_activity
+        INSERT INTO users (user_id, name, username, first_seen, last_activity)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (user_id) DO UPDATE SET
+        name = EXCLUDED.name,
+        username = EXCLUDED.username,
+        last_activity = EXCLUDED.last_activity
         ''', user_id, name, username, now_iso, now_iso)
 
         # Записываем время БД
@@ -176,16 +164,16 @@ async def _process_single(conn, data: dict):
         if chat_id and chat_id < 0:
             db_start = time.time()
             await conn.execute('''
-                INSERT INTO users_chats (chat_id, user_id)
-                VALUES ($1, $2)
-                ON CONFLICT (chat_id, user_id) DO NOTHING
+            INSERT INTO users_chats (chat_id, user_id)
+            VALUES ($1, $2)
+            ON CONFLICT (chat_id, user_id) DO NOTHING
             ''', chat_id, user_id)
             db_time_ms = (time.time() - db_start) * 1000
             metrics.record_db_time(db_time_ms)
 
-            # Обновление информации о чате
-            if chat_title is not None:
-                await _update_chat_info_smart(conn, chat_id, chat_title, chat_username)
+        # Обновление информации о чате
+        if chat_title is not None:
+            await _update_chat_info_smart(conn, chat_id, chat_title, chat_username)
 
         # Обновление кэша игнора
         ignored = await conn.fetchval('SELECT 1 FROM ignore_users WHERE user_id = $1', user_id)
@@ -193,9 +181,6 @@ async def _process_single(conn, data: dict):
 
         # === НОВОЕ: запись транзакции ===
         metrics.record_transaction()
-
-        #logger.info(f"✅ [{bot_id}] Processed user {user_id}")
-
     except Exception as e:
         logger.error(f"❌ Error processing user update: {e}", exc_info=True)
 
@@ -207,23 +192,18 @@ async def _process_chat_member_in_background(event):
         if getattr(event, '_already_processed', False):
             logger.debug(f"  Chat member event already processed, skipping")
             return
-
         old_status = event.old_chat_member.status
         new_status = event.new_chat_member.status
         user = event.new_chat_member.user
-
         logger.debug(f"  Background: chat member update user_id={user.id}")
-
         # Здесь НЕ вызываем handle_join/handle_leave - они уже вызваны в middleware
         # Только логируем
-
         if old_status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED] and new_status == ChatMemberStatus.MEMBER:
             logger.debug(f"    Background: user joined (already processed)")
         elif old_status == ChatMemberStatus.MEMBER and new_status == ChatMemberStatus.LEFT:
             logger.debug(f"    Background: user left (already processed)")
         elif old_status == ChatMemberStatus.RESTRICTED and new_status == ChatMemberStatus.RESTRICTED:
             logger.debug(f"    Background: restricted status changed")
-
     except Exception as e:
         logger.error(f"❌ Error in chat member background processing: {e}")
 
@@ -239,8 +219,8 @@ async def _update_chat_info_smart(conn, chat_id: int, title: str, username: str)
 
         # Проверяем, нужно ли обновлять
         chat_record = await conn.fetchrow(
-            '''SELECT chat_title, chat_username, invite_link_updated_at 
-               FROM chats WHERE chat_id = $1''',
+            '''SELECT chat_title, chat_username, invite_link_updated_at
+            FROM chats WHERE chat_id = $1''',
             chat_id
         )
 
@@ -277,7 +257,6 @@ async def _update_chat_info_smart(conn, chat_id: int, title: str, username: str)
         # Получаем информацию о чате
         owner_id = None
         invite_link = None
-
         try:
             admins = await _THE_BOT.get_chat_administrators(chat_id)
             chat_owner = next((a for a in admins if a.status == 'creator'), None)
@@ -297,25 +276,24 @@ async def _update_chat_info_smart(conn, chat_id: int, title: str, username: str)
         # Обновляем или вставляем запись
         if chat_record:
             await conn.execute('''
-                UPDATE chats SET
-                    chat_title = $1,
-                    chat_username = $2,
-                    invite_link = COALESCE($3, invite_link),
-                    invite_link_updated_at = $4,
-                    owner_id = COALESCE($5, owner_id)
-                WHERE chat_id = $6
+            UPDATE chats SET
+            chat_title = $1,
+            chat_username = $2,
+            invite_link = COALESCE($3, invite_link),
+            invite_link_updated_at = $4,
+            owner_id = COALESCE($5, owner_id)
+            WHERE chat_id = $6
             ''', title, username, invite_link, current_time_iso, owner_id, chat_id)
         else:
             await conn.execute('''
-                INSERT INTO chats (
-                    chat_id, chat_title, chat_username, invite_link, 
-                    invite_link_updated_at, owner_id, bot_chat_status, number_for_inputs
-                ) VALUES ($1, $2, $3, $4, $5, $6, 'unknown', 1)
+            INSERT INTO chats (
+            chat_id, chat_title, chat_username, invite_link,
+            invite_link_updated_at, owner_id, bot_chat_status, number_for_inputs
+            ) VALUES ($1, $2, $3, $4, $5, $6, 'unknown', 1)
             ''', chat_id, title, username, invite_link, current_time_iso, owner_id)
 
         logger.info(f"✅ Updated chat info for {chat_id}")
         return True
-
     except Exception as e:
         logger.error(f"❌ Chat update error {chat_id}: {e}", exc_info=True)
         return False
@@ -343,12 +321,14 @@ async def stop_background_worker():
     for bot_id, task in _WORKER_TASKS.items():
         if not task.done():
             task.cancel()
+
     # Ждём завершения
     for bot_id, task in _WORKER_TASKS.items():
         try:
             await task
         except asyncio.CancelledError:
             pass
+
     logger.info("✅ All background workers stopped")
     _WORKER_TASKS.clear()
 
@@ -366,6 +346,7 @@ async def get_queue_delay_for_bot(bot_id: str) -> float:
     now = time.time()
     if now - tracker["last_update"] > 5.0:
         tracker["max_delay"] = 0.0
+
     return tracker["max_delay"]
 
 

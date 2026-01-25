@@ -1,31 +1,34 @@
 import asyncio
 import logging
 import os
-import sys
 import subprocess
 import psutil
 import platform
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
+from typing import List
 
 from aiogram import Router, F
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
 
-from handlers.BotAutomaticWork.Gonfig.config import boss_agent
-from handlers.BotAutomaticWork.DataBase.ConnectDataBase.ConnectDataBaseCache import load_full_db_to_cache
+from handlers.AdminsTools.ChatSettings.captcha.captchaDB import is_captcha_enabled, get_user_last_successful_captcha, \
+    get_captcha_settings
+from handlers.BotAutomaticWork.Gonfig.config import boss_agent, sanor_ID
+from handlers.BotAutomaticWork.DataBase.ConnectDataBase.ConnectDataBaseCache import load_full_db_to_cache, get_db_pool
+from handlers.BotAutomaticWork.parse_time_auto import parse_time_string
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+#from test import create_rps_chart
 
 router = Router()
 logger = logging.getLogger(__name__)
 
-moscow_time = pytz.timezone('Europe/Moscow')
-now = datetime.now(moscow_time)
-time = now.hour
-day = now.day
-mon = now.month
+moscow_tz = pytz.timezone('Europe/Moscow')
+now_msk = datetime.now(moscow_tz)
+time = now_msk.hour
+day = now_msk.day
+mon = now_msk.month
 
 # Новогодняя ночь: 31 декабря, с 18:00 до 23:59
 if mon == 12 and day == 31 and 18 <= time < 24:
@@ -43,74 +46,246 @@ else:
     time1 = '🌃 Доброй ночи,'
 
 
+# ============ ФУНКЦИИ ДЛЯ ПОЛУЧЕНИЯ СТАТИСТИКИ ============
+async def get_users_count() -> int:
+    """Получить количество пользователей в базе"""
+    try:
+        pool = get_db_pool()
+        async with pool.acquire() as conn:
+            count = await conn.fetchval('SELECT COUNT(*) FROM users')
+            return count or 0
+    except Exception as e:
+        logger.error(f"Ошибка получения количества пользователей: {e}", exc_info=True)
+        return 0
+
+
+async def get_chats_count() -> int:
+    """Получить количество чатов в базе"""
+    try:
+        pool = get_db_pool()
+        async with pool.acquire() as conn:
+            count = await conn.fetchval('SELECT COUNT(*) FROM chats')
+            return count or 0
+    except Exception as e:
+        logger.error(f"Ошибка получения количества чатов: {e}", exc_info=True)
+        return 0
+
+
+async def get_ignore_users_count() -> int:
+    """Получить количество пользователей в игноре"""
+    try:
+        pool = get_db_pool()
+        async with pool.acquire() as conn:
+            count = await conn.fetchval('SELECT COUNT(*) FROM ignore_users')
+            return count or 0
+    except Exception as e:
+        logger.error(f"Ошибка получения количества игнорируемых пользователей: {e}", exc_info=True)
+        return 0
+
+
+async def get_anti_spam_users_count() -> int:
+    """Получить количество пользователей в антиспаме"""
+    try:
+        pool = get_db_pool()
+        async with pool.acquire() as conn:
+            count = await conn.fetchval('SELECT COUNT(*) FROM anti_spam_users')
+            return count or 0
+    except Exception as e:
+        logger.error(f"Ошибка получения количества пользователей в антиспаме: {e}", exc_info=True)
+        return 0
+
+
+async def get_acting_agents() -> List[str]:
+    """Получить список активных агентов"""
+    try:
+        pool = get_db_pool()
+        async with pool.acquire() as conn:
+            # Получаем только ID активных агентов
+            rows = await conn.fetch('SELECT acting_agent_id FROM acting_agents')
+
+            agents = []
+            for row in rows:
+                agent_id = row['acting_agent_id']
+                # Пытаемся получить ссылку на агента
+                try:
+                    agent_link = await user_link_global(agent_id)
+                    agents.append(f'{agent_link} (<code>{agent_id}</code>)')
+                except:
+                    agents.append(f"ID: {agent_id}")
+
+            return agents
+    except Exception as e:
+        logger.error(f"Ошибка получения активных агентов: {e}", exc_info=True)
+        return []
+
+
+async def get_system_stats() -> str:
+    """Получить статистику системы"""
+    try:
+        # Получаем статистику параллельно для скорости
+        users_count, chats_count, ignore_count, anti_spam_count, agents = await asyncio.gather(
+            get_users_count(),
+            get_chats_count(),
+            get_ignore_users_count(),
+            get_anti_spam_users_count(),
+            get_acting_agents()
+        )
+
+        # Форматируем список агентов
+        if agents:
+            agents_list = "\n".join([f"• {agent}" for agent in agents])
+            agents_text = f"<b>Активные агенты:</b>\n{agents_list}"
+        else:
+            agents_text = "<b>Активные агенты:</b> Нет активных агентов"
+
+        stats_text = f"""
+<blockquote><b>📊 СТАТИСТИКА СИСТЕМЫ:</b>
+
+👤 <b>Юзеров в базе:</b> {users_count}
+💬 <b>Чатов в базе:</b> {chats_count}
+🚫 <b>Юзеров в игноре:</b> {ignore_count}
+🛡️ <b>Юзеров в антиспаме:</b> {anti_spam_count}
+
+{agents_text}</blockquote>
+"""
+        return stats_text
+
+    except Exception as e:
+        logger.error(f"Ошибка получения статистики: {e}", exc_info=True)
+        return "<blockquote>❌ <b>Ошибка получения статистики</b></blockquote>"
+
+
+
+
+
+
+
+
+
+
+
 # ============ КОМАНДЫ ============
 @router.message(Command("start"))
 async def start_command(message: Message):
-    """Обработчик команды /start"""
+    """Обработчик команды /start — поддерживает обычный запуск и капчу"""
     try:
-        if message.chat.type == 'private':
-            user_id = message.from_user.id
-            user_link = await user_link_global(user_id)
+        if message.chat.type != 'private':
+            return
 
-            if user_id in boss_agent:
-                markup = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text='🔄️ Перезагрузить бота', callback_data='restart_bot')],
-                    [InlineKeyboardButton(text='🐝 Перезагрузить кеш', callback_data='reload_cache')],
-                    [InlineKeyboardButton(text='⚙️ Управление системой', callback_data='system_menu')]
-                ])
+        user = message.from_user
+        if not user:
+            return
 
-                await message.answer(
-                    f"""<b>{time1} {user_link}!</b>
-                    
+        user_id = user.id
+        user_link = await user_link_global(user_id)
+
+        # === Обработка deep link для капчи ===
+        if message.text and message.text.startswith("/start captcha_"):
+            # Формат: /start captcha_CHATID_USERID
+            payload = message.text.split(" ", 1)[1]  # "captcha_CHATID_USERID"
+            parts = payload.split("_")
+
+            if len(parts) == 3 and parts[0] == "captcha":
+                try:
+                    chat_id = int(parts[1])
+                    target_user_id = int(parts[2])
+                except (ValueError, IndexError):
+                    await message.answer("❌ Неверная ссылка для капчи.")
+                    return
+
+                # Проверяем, что пользователь совпадает
+                if user_id != target_user_id:
+                    await message.answer("❌ Эта капча предназначена другому пользователю.")
+                    return
+
+                # Проверяем, включена ли капча в чате
+                if not await is_captcha_enabled(chat_id):
+                    await message.answer("ℹ️ Капча в этом чате больше не требуется.")
+                    return
+
+                # Проверяем, не прошёл ли уже капчу
+                last_successful = await get_user_last_successful_captcha(chat_id, user_id)
+                if last_successful:
+                    difficulty_levels = {'легкая': 1, 'средняя': 2, 'тяжелая': 3, 'хардкорд': 4}
+                    current_difficulty = (await get_captcha_settings(chat_id))[1]
+                    current_level = difficulty_levels.get(current_difficulty, 1)
+                    previous_level = difficulty_levels.get(last_successful[0], 1)
+                    if current_level <= previous_level:
+                        await message.answer("✅ Вы уже прошли капчу в этом чате!")
+                        return
+
+                # Получаем настройки капчи
+                time_limit_str, difficulty, attempts_limit, _ = await get_captcha_settings(chat_id)
+                time_limit = parse_time_string(time_limit_str) or timedelta(minutes=5)
+
+                # Отправляем капчу
+                from handlers.AdminsTools.ChatSettings.captcha.captcha_main import send_captcha_to_user
+                await send_captcha_to_user(
+                    bot=message.bot,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    difficulty=difficulty,
+                    attempts_limit=attempts_limit,
+                    time_limit=time_limit
+                )
+                return  # Не показываем обычное меню
+
+        # === Обычный запуск (/start без аргументов или с другим payload) ===
+        # Динамическое приветствие
+        now_msk = datetime.now(pytz.timezone('Europe/Moscow'))
+        hour = now_msk.hour
+        month = now_msk.month
+        day = now_msk.day
+
+        if month == 12 and day == 31 and 18 <= hour < 24:
+            time1 = '🎄 Новогодняя ночь прекрасна!'
+        elif month == 1 and day == 1 and 0 <= hour < 14:
+            time1 = '🎆 С Новым Годом!'
+        elif 6 <= hour < 12:
+            time1 = '🌄 Доброе утро,'
+        elif 12 <= hour < 18:
+            time1 = '👋🏻 Доброго времени суток,'
+        elif 18 <= hour < 21:
+            time1 = '🌆 Добрый вечер,'
+        else:
+            time1 = '🌃 Доброй ночи,'
+
+        if user_id == sanor_ID:  # Убедитесь, что sanor_ID — это ID (int), а не список!
+            stats_text = await get_system_stats()
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text='🔄️ Перезагрузить бота', callback_data='restart_bot')],
+                [InlineKeyboardButton(text='🐝 Перезагрузить кеш', callback_data='reload_cache')],
+                [InlineKeyboardButton(text='⚙️ Управление системой', callback_data='system_menu')]
+            ])
+            await message.answer(
+                f"""<b>{time1} {user_link}!</b>
+<a href="https://t.me/+iwWRkgyHOwQ3ZjMy">Официальный канал</a> | <a href="https://teletype.in/@sap_sp/commands">Мой функционал</a>
+{stats_text}""",
+                parse_mode='HTML',
+                disable_web_page_preview=True,
+                reply_markup=markup
+            )
+        else:
+            await message.answer(
+                f"""<b>{time1} {user_link}!</b>
+
 <a href="https://t.me/+iwWRkgyHOwQ3ZjMy">Официальный канал</a> | <a href="https://teletype.in/@sap_sp/commands">Мой функционал</a>                    
 <blockquote>⚠️ Бот только-только запустился, поэтому есть некоторые неточности.
 Большая просьба сообщать о найденных ошибках в <a href="https://t.me/sap_sp_chat">Sapphire | Chat</a></blockquote>
 """,
-                    parse_mode='HTML',
-                    disable_web_page_preview=True,
-                    reply_markup=markup
-                )
-            else:
-                await message.answer(
-                    f"""<b>{time1} {user_link}!</b>
-                    
-<a href="https://t.me/+iwWRkgyHOwQ3ZjMy">Официальный канал</a> | <a href="https://teletype.in/@sap_sp/commands">Мой функционал</a>                    
-<blockquote>⚠️ Бот только-только запустился, поэтому есть некоторые неточности.
-Большая просьба сообщать о найденных ошибках в <a href="https://t.me/sap_sp_chat">Sapphire | Chat</a></blockquote>
-""",
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
-                )
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
 
     except Exception as e:
         logger.error(f"Ошибка в start_command: {e}", exc_info=True)
+        await message.answer("❌ Произошла ошибка. Попробуйте позже.")
 
 
-@router.message(Command("system"))
-async def system_command(message: Message):
-    """Команда /system - меню управления"""
-    if message.from_user.id not in boss_agent:
-        return
-
-    await show_system_menu(message)
 
 
-@router.message(Command("status"))
-async def status_command(message: Message):
-    """Команда /status - статус системы"""
-    if message.from_user.id not in boss_agent:
-        return
-
-    await show_system_status(message)
 
 
-@router.message(Command("restart"))
-async def restart_command(message: Message):
-    """Команда /restart - меню перезагрузки"""
-    if message.from_user.id not in boss_agent:
-        return
-
-    await show_restart_menu(message)
 
 
 # ============ ФУНКЦИИ ПОКАЗА МЕНЮ ============
@@ -468,7 +643,6 @@ async def clear_all_cache_handler(call: CallbackQuery):
         )
 
 
-
 # ============ СТАРЫЕ КНОПКИ ============
 @router.callback_query(F.data == 'restart_bot')
 async def restart_bot_handler(call: CallbackQuery):
@@ -505,6 +679,9 @@ async def back_to_main_handler(call: CallbackQuery):
         user_link = await user_link_global(user_id)
 
         if user_id in boss_agent:
+            # Получаем статистику для администраторов
+            stats_text = await get_system_stats()
+
             markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text='🔄️ Перезагрузить бота', callback_data='restart_bot')],
                 [InlineKeyboardButton(text='🐝 Перезагрузить кеш', callback_data='reload_cache')],
@@ -512,8 +689,11 @@ async def back_to_main_handler(call: CallbackQuery):
             ])
 
             await call.message.edit_text(
-                f"""<b>{time1} {user_link}</b>,
-На данный момент я нахожусь в бета тесте.""",
+                f"""<b>{time1} {user_link}</b>
+
+{stats_text}
+
+<i>На данный момент я нахожусь в бета тесте.</i>""",
                 parse_mode='HTML',
                 disable_web_page_preview=True,
                 reply_markup=markup
@@ -526,7 +706,21 @@ async def back_to_main_handler(call: CallbackQuery):
 
 
 # ============ ОБРАБОТКА ОШИБОК ============
-#@router.callback_query()
+# @router.callback_query()
 async def unknown_callback(call: CallbackQuery):
     """Обработка неизвестных callback'ов"""
     await call.answer("⚠️ Эта функция временно недоступна", show_alert=True)
+
+
+# ============ КОМАНДА ДЛЯ СТАТИСТИКИ ============
+@router.message(Command("stats"))
+async def stats_command(message: Message):
+    """Показать статистику системы (только для администраторов)"""
+    try:
+        if message.from_user.id in sanor_ID:
+            stats_text = await get_system_stats()
+            await message.answer(stats_text, parse_mode='HTML')
+        else:
+            await message.answer("❌ Эта команда доступна только администраторам.")
+    except Exception as e:
+        logger.error(f"Ошибка в stats_command: {e}", exc_info=True)

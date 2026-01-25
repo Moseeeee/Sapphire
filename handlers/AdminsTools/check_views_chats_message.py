@@ -16,7 +16,7 @@ async def send_message(chat_link):
                                              disable_web_page_preview=True)
     return channel_message
 
-@CVCM.message(F.text.regexp(re.compile(r'^[!/.]актив(\s|$)', re.IGNORECASE)))
+@CVCM.message(F.text.regexp(re.compile(r'^[!/.]актив$', re.IGNORECASE)))
 async def send_activity(message: Message):
 
     if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 57):

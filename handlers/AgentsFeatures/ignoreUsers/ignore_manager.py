@@ -7,16 +7,14 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
-from handlers.AgentsFeatures.payment.payment import check_user_access
-from handlers.BotAutomaticWork.Gonfig.config import boss_agent
 from handlers.AgentsFeatures.AntiSpam.AntiSpam import user_pagination_states
 from handlers.AgentsFeatures.ignoreUsers.ignore_managerDB import check_ignore, add_to_ignore, get_ignore_info, \
     remove_from_ignore, get_ignore_history
 from handlers.BotAutomaticWork.users.GenderUtils import g
-from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_agent_access
+from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_user_access
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 logger = logging.getLogger(__name__)
 

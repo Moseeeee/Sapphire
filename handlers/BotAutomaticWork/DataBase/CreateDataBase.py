@@ -58,7 +58,8 @@ async def create_db():
                     invite_link TEXT,
                     invite_link_updated_at TEXT,
                     first_seen TEXT,
-                    last_update TEXT
+                    last_update TEXT,
+                    min_rp_rating INTEGER DEFAULT 0
                 );
             ''')
 
@@ -183,6 +184,7 @@ async def create_db():
                 CREATE TABLE IF NOT EXISTS users_chats (
                     chat_id BIGINT,
                     user_id BIGINT,
+                    pseudonym TEXT,
                     PRIMARY KEY (chat_id, user_id)
                 );
             ''')
@@ -431,7 +433,37 @@ async def create_db():
             );
             ''')
 
+        # =========== ССЫЛКИ И НАСТРОЙКА ИХ ==========
+            async with pool.acquire() as conn:
+                await conn.execute('''
+                            CREATE TABLE IF NOT EXISTS link_filter_settings (
+                                chat_id BIGINT PRIMARY KEY,
+                                filter_websites BOOLEAN DEFAULT FALSE,
+                                filter_chats BOOLEAN DEFAULT FALSE,
+                                filter_referrals BOOLEAN DEFAULT FALSE,
+                                filter_all BOOLEAN DEFAULT FALSE,
+                                action TEXT DEFAULT 'warn',
+                                created_at TIMESTAMP DEFAULT NOW(),
+                                updated_at TIMESTAMP DEFAULT NOW()
+                            )
+                        ''')
 
+            # Таблица вайт-листа
+            async with pool.acquire() as conn:
+                await conn.execute('''
+                            CREATE TABLE IF NOT EXISTS link_filter_whitelist (
+                                id SERIAL PRIMARY KEY,
+                                chat_id BIGINT NOT NULL,
+                                link_pattern TEXT NOT NULL,
+                                is_regex BOOLEAN DEFAULT FALSE,
+                                added_by BIGINT,
+                                created_at TIMESTAMP DEFAULT NOW(),
+                                UNIQUE(chat_id, link_pattern)
+                            )
+                        ''')
+
+                # Индексы для оптимизации
+                #await conn.execute('CREATE INDEX IF NOT EXISTS idx_whitelist_chat ON link_filter_whitelist(chat_id)')
 
         # ========== КОМАНДЫ И ПРАВА ==========
         async with pool.acquire() as conn:
@@ -576,7 +608,7 @@ async def init_commands_structure():
         {"names": ["Управление чёрным списком"], "CommandId": 21, "AccessLevel": 1, "UnderSectionId": 5},
         {"names": ["Список активных банов"], "CommandId": 22, "AccessLevel": 1, "UnderSectionId": 5},
         {"names": ["Информация о блокировке"], "CommandId": 23, "AccessLevel": 1, "UnderSectionId": 5},
-        {"names": ["Настройка длительности бана по умолчанию"], "CommandId": 24, "AccessLevel": 0, "UnderSectionId": 5},
+        {"names": ["Настройка длительности бана по умолчанию"], "CommandId": 24, "AccessLevel": 4, "UnderSectionId": 5},
 
 
 
@@ -588,7 +620,7 @@ async def init_commands_structure():
 
         {"names": ["Управление варнами"], "CommandId": 29, "AccessLevel": 1, "UnderSectionId": 8},
         {"names": ["Список активных варнов"], "CommandId": 30, "AccessLevel": 1, "UnderSectionId": 8},
-        {"names": ["Список активных варнов пользователя"], "CommandId": 60, "AccessLevel": 1, "UnderSectionId": 8},
+        {"names": ["Список активных варнов пользователя"], "CommandId": 60, "AccessLevel": 0, "UnderSectionId": 8},
         {"names": ["Настройка длительности варна по умолчанию"], "CommandId": 31, "AccessLevel": 4, "UnderSectionId": 8},
         {"names": ["Настройка лимита варнов"], "CommandId": 32, "AccessLevel": 4, "UnderSectionId": 8},
         {"names": ["Настройка автонаказания"], "CommandId": 33, "AccessLevel": 4, "UnderSectionId": 8},
@@ -597,9 +629,9 @@ async def init_commands_structure():
 
         {"names": ["Отправка жалоб"], "CommandId": 34, "AccessLevel": 0, "UnderSectionId": 7},
         {"names": ["Список необработанных жалоб"], "CommandId": 35, "AccessLevel": 1, "UnderSectionId": 7},
-        {"names": ["Статистика по жалобам"], "CommandId": 36, "AccessLevel": 2, "UnderSectionId": 7},
+        {"names": ["Статистика по жалобам"], "CommandId": 36, "AccessLevel": 1, "UnderSectionId": 7},
         {"names": ["Настройка чат-репортов"], "CommandId": 37, "AccessLevel": 4, "UnderSectionId": 7},
-        {"names": ["Список привязанных чатов"], "CommandId": 38, "AccessLevel": 4, "UnderSectionId": 7},
+        {"names": ["Список привязанных чатов"], "CommandId": 38, "AccessLevel": 1, "UnderSectionId": 7},
 
 
         {"names": ["Настройка информации о чате"], "CommandId": 39, "AccessLevel": 4, "UnderSectionId": 11},
@@ -609,11 +641,16 @@ async def init_commands_structure():
         {"names": ["Управление администраторами"], "CommandId": 41, "AccessLevel": 4, "UnderSectionId": 13},
         {"names": ["Просмотр историй администраторов"], "CommandId": 42, "AccessLevel": 4, "UnderSectionId": 13},
         {"names": ["Восстановление прав владельца"], "CommandId": 43, "AccessLevel": 4, "UnderSectionId": 13},
+        {"names": ["Список администраторов"], "CommandId": 64, "AccessLevel": 0, "UnderSectionId": 13},
 
 
         {"names": ["Настройка капчи"], "CommandId": 44, "AccessLevel": 4, "UnderSectionId": 18},
         {"names": ["Просмотр истории о капче"], "CommandId": 45, "AccessLevel": 1, "UnderSectionId": 18},
         {"names": ["Настройка антиспама"], "CommandId": 46, "AccessLevel": 4, "UnderSectionId": 18},
+
+        {"names": ["Настройка запрещённых ссылок"], "CommandId": 65, "AccessLevel": 3, "UnderSectionId": 18},
+        {"names": ["Просмотр настроек запрещённых ссылок"], "CommandId": 66, "AccessLevel": 1, "UnderSectionId": 18},
+        {"names": ["Проверка ссылок"], "CommandId": 67, "AccessLevel": 0, "UnderSectionId": 18},
 
 
         {"names": ["Настройка правил"], "CommandId": 47, "AccessLevel": 3, "UnderSectionId": 9},
@@ -638,6 +675,8 @@ async def init_commands_structure():
         {"names": ["Просмотр статистики входов и выходах"], "CommandId": 57, "AccessLevel": 3, "UnderSectionId": 19},
 
         {"names": ["Просмотр профиля пользователя"], "CommandId": 58, "AccessLevel": 0, "UnderSectionId": 20},
+        {"names": ["Настройка профиля пользователя"], "CommandId": 68, "AccessLevel": 0, "UnderSectionId": 20},
+        {"names": ["Список ников"], "CommandId": 69, "AccessLevel": 0, "UnderSectionId": 20},
         {"names": ["Погода"], "CommandId": 59, "AccessLevel": 0, "UnderSectionId": 20},
 
     ]

@@ -13,8 +13,8 @@ cache_lock = Lock()
 
 # Таблицы для кеширования (должны соответствовать структуре PostgreSQL)
 CACHE_TABLES = {
-    'users': ['user_id', 'name', 'username', 'last_activity'],
-    'chats': ['chat_id', 'chat_title', 'chat_username', 'bot_chat_status', 'owner_id', 'status_v', 'status_e', 'invite_link'],
+    #'users': ['user_id', 'name', 'username', 'last_activity'],
+    #'chats': ['chat_id', 'chat_title', 'chat_username', 'bot_chat_status', 'owner_id', 'status_v', 'status_e', 'invite_link'],
     #'rules': ['chat_id', 'rules_text'],
     #'welcome': ['chat_id', 'welcome_text'],
     #'agents': ['agent_id', 'agent_appointed_id', 'date_appointed'],

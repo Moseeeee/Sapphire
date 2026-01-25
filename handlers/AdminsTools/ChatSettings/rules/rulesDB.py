@@ -1,4 +1,6 @@
-# handlers/BotAutomaticWork/DataBase/rules.py
+
+
+
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.ConnectDataBaseCache import auto_cache_update, cache_lock, memory_cache
 
 import logging

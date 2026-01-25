@@ -1,5 +1,3 @@
-#MiddlewarePerformance
-
 import time
 import logging
 from aiogram import BaseMiddleware

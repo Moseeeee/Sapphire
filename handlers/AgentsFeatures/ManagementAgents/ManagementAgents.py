@@ -2,7 +2,6 @@ import logging
 
 from aiogram import *
 from aiogram.types import *
-from aiogram.filters import *
 from datetime import datetime
 from pytz import timezone
 from handlers.BotAutomaticWork.Gonfig.config import boss_agent
@@ -22,7 +21,7 @@ from handlers.BotAutomaticWork.universal_bot import bot
 from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 logger = logging.getLogger(__name__)
 

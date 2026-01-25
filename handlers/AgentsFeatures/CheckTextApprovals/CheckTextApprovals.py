@@ -8,14 +8,13 @@ from handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovalsDB import (
     get_pending_moderation_note, delete_pending_moderation_note
 )
 from handlers.AdminsTools.ChatSettings.notes.notesDB import add_note
-from handlers.AgentsFeatures.payment.payment import check_user_access
 from handlers.BotAutomaticWork.Gonfig.config import AGENT_CHAT_ID_CheckTextApprovals
 from handlers.BotAutomaticWork.AddChatsBot.link.chats_global_link import chat_global_link
 from handlers.BotAutomaticWork.users.GenderUtils import g
-from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_agent_access
+from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_user_access
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 check_text_agents_router = Router()
 logger = logging.getLogger(__name__)
@@ -50,9 +49,7 @@ async def handle_text_moderation(callback: CallbackQuery, action: str, content_t
     """Обработка модерации правил и приветствий"""
     try:
         user_id = callback.from_user.id
-        agent_rang = await check_agent_access(user_id)
-        if agent_rang < 0:
-            return
+        await check_user_access(user_id, 1)
 
         record = await get_pending_moderation(chat_id, content_type)
         if not record:
@@ -85,9 +82,7 @@ async def handle_note_moderation(callback: CallbackQuery, action: str, chat_id: 
     """Обработка модерации заметок"""
     try:
         user_id = callback.from_user.id
-        agent_rang = await check_agent_access(user_id)
-        if agent_rang <= 0:
-            return
+        await check_user_access(user_id, 1)
 
         record = await get_pending_moderation_note(chat_id, notes_name)
         if not record:

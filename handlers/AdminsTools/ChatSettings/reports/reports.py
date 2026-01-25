@@ -33,7 +33,7 @@ from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 from handlers.BotAutomaticWork.universal_bot import bot
 
 report = Router()

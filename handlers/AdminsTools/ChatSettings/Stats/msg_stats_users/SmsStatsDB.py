@@ -200,8 +200,9 @@ async def clean_old_stats(chat_id: int, period: str):
                 )
                 """, chat_id)
 
+
     except Exception as e:
-        logger.error(e, exc_info=True)
+        logger.error(f"Ошибка в clean_old_stats для чата {chat_id}, периода {period}: {e}", exc_info=True)
 
 
 async def reset_all_stats(chat_id: int):

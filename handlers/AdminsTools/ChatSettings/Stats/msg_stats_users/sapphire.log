@@ -1,2 +1,5 @@
 2026-01-04 00:36:07,234 - INFO - handlers.BotAutomaticWork.BotCreatedGlobal - ✅ Бот инициализирован: Sapphire | Chat Manager
 2026-01-04 00:36:07,234 - INFO - handlers.BotAutomaticWork.BotCreatedGlobal - ✅ Всего инициализировано 1 ботов
+2026-01-14 20:03:29,807 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
+2026-01-14 20:03:29,815 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: Sapphire | Chat Manager (bot_1)
+2026-01-14 20:03:29,815 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'

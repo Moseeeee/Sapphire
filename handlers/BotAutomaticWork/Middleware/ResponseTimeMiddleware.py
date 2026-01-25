@@ -1,70 +1,148 @@
-# handlers/BotAutomaticWork/Middleware/ResponseTimeMiddleware.py
-import time
 import logging
-from typing import Callable, Dict, Any, Awaitable, Optional
-from aiogram import BaseMiddleware
-from aiogram.types import Update
 
-
+from aiogram.types import (
+    Message, CallbackQuery, ChatMemberUpdated,
+    InlineQuery, ChosenInlineResult,
+    ShippingQuery, PreCheckoutQuery, PollAnswer,
+    ChatJoinRequest, Update
+)
 logger = logging.getLogger(__name__)
 
+def extract_user_info(update_or_event):
+    """Извлечь информацию о пользователе из Update или события"""
+    logger.debug(f"🔍 Extracting user info from: {type(update_or_event).__name__}")
 
-class ResponseTimeMiddleware(BaseMiddleware):
-    """Middleware для отслеживания времени ответа ботов"""
+    user = None
+    chat = None
 
-    def __init__(self, bot_id: str):
-        super().__init__()
-        self.bot_id = bot_id
-        logger.info(f"⏱️ ResponseTimeMiddleware для бота {bot_id}")
+    try:
+        # Если это Update, извлекаем из него событие
+        if isinstance(update_or_event, Update):
+            event = None
 
-    async def __call__(
-            self,
-            handler: Callable[[Update, Dict[str, Any]], Awaitable[Any]],
-            event: Update,
-            data: Dict[str, Any]
-    ) -> Any:
-        start_time = time.time()
+            # Проверяем все возможные типы событий в Update
+            if update_or_event.message:
+                event = update_or_event.message
+                logger.debug(f"  Found Message in Update")
+            elif update_or_event.edited_message:
+                event = update_or_event.edited_message
+                logger.debug(f"  Found EditedMessage in Update")
+            elif update_or_event.callback_query:
+                event = update_or_event.callback_query
+                logger.debug(f"  Found CallbackQuery in Update")
+            elif update_or_event.chat_member:
+                event = update_or_event.chat_member
+                logger.debug(f"  Found ChatMemberUpdated in Update")
+            elif update_or_event.my_chat_member:
+                event = update_or_event.my_chat_member
+                logger.debug(f"  Found MyChatMember in Update")
+            elif update_or_event.chat_join_request:
+                event = update_or_event.chat_join_request
+                logger.debug(f"  Found ChatJoinRequest in Update")
+            elif update_or_event.inline_query:
+                event = update_or_event.inline_query
+                logger.debug(f"  Found InlineQuery in Update")
+            elif update_or_event.chosen_inline_result:
+                event = update_or_event.chosen_inline_result
+                logger.debug(f"  Found ChosenInlineResult in Update")
+            elif update_or_event.shipping_query:
+                event = update_or_event.shipping_query
+                logger.debug(f"  Found ShippingQuery in Update")
+            elif update_or_event.pre_checkout_query:
+                event = update_or_event.pre_checkout_query
+                logger.debug(f"  Found PreCheckoutQuery in Update")
+            elif update_or_event.poll:
+                event = update_or_event.poll
+                logger.debug(f"  Found Poll in Update")
+            elif update_or_event.poll_answer:
+                event = update_or_event.poll_answer
+                logger.debug(f"  Found PollAnswer in Update")
+            elif update_or_event.chat_boost:
+                event = update_or_event.chat_boost
+                logger.debug(f"  Found ChatBoostUpdated in Update")
+            elif update_or_event.removed_chat_boost:
+                event = update_or_event.removed_chat_boost
+                logger.debug(f"  Found RemovedChatBoost in Update")
+            else:
+                logger.warning(f"  No known event found in Update")
+                return None
 
-        try:
-            # Выполняем обработчик
-            result = await handler(event, data)
+            if event:
+                logger.debug(f"  Processing event type: {type(event).__name__}")
+                return extract_user_info(event)  # Рекурсивно обрабатываем событие
+            else:
+                return None
 
-            # Рассчитываем время ответа
-            response_time = (time.time() - start_time) * 1000  # в мс
+        # Обработка конкретных типов событий
+        elif isinstance(update_or_event, Message):
+            user = update_or_event.from_user
+            chat = update_or_event.chat
+            logger.debug(f"  Message: user_id={user.id if user else 'None'}, chat_id={chat.id if chat else 'None'}")
 
-            # Извлекаем user_id из события
-            user_id = self._extract_user_id(event)
-            if user_id:
-                # Записываем время ответа
-                bot_stats_manager.record_handled(self.bot_id, user_id, response_time)
+        elif isinstance(update_or_event, CallbackQuery):
+            user = update_or_event.from_user
+            if update_or_event.message:
+                chat = update_or_event.message.chat
+            logger.debug(f"  CallbackQuery: user_id={user.id if user else 'None'}, chat={'has' if chat else 'no'} chat")
 
-                # Также записываем как пинг к Telegram (если это ответ на API вызов)
-                if response_time < 10000:  # Игнорируем слишком большие значения
-                    bot_stats_manager.record_telegram_ping(self.bot_id, response_time)
+        elif isinstance(update_or_event, ChatMemberUpdated):
+            # Получаем пользователя из new_chat_member
+            if update_or_event.new_chat_member:
+                user = update_or_event.new_chat_member.user
+            elif update_or_event.old_chat_member:
+                user = update_or_event.old_chat_member.user
+            chat = update_or_event.chat
+            logger.debug(
+                f"  ChatMemberUpdated: user_id={user.id if user else 'None'}, chat_id={chat.id if chat else 'None'}")
 
-            return result
+        elif isinstance(update_or_event, ChatJoinRequest):
+            user = update_or_event.from_user
+            chat = update_or_event.chat
+            logger.debug(
+                f"  ChatJoinRequest: user_id={user.id if user else 'None'}, chat_id={chat.id if chat else 'None'}")
 
-        except Exception as e:
-            # При ошибке также записываем время
-            response_time = (time.time() - start_time) * 1000
-            logger.error(f"❌ Ошибка в ResponseTimeMiddleware: {e}, время: {response_time:.0f}мс")
+        elif isinstance(update_or_event, InlineQuery):
+            user = update_or_event.from_user
+            logger.debug(f"  InlineQuery: user_id={user.id if user else 'None'}")
 
-            # Записываем ошибку в статистику
-            bot_stats_manager.get_or_create_bot_stats(self.bot_id).record_error()
+        elif isinstance(update_or_event, ChosenInlineResult):
+            user = update_or_event.from_user
+            logger.debug(f"  ChosenInlineResult: user_id={user.id if user else 'None'}")
 
-            raise
+        elif isinstance(update_or_event, ShippingQuery):
+            user = update_or_event.from_user
+            logger.debug(f"  ShippingQuery: user_id={user.id if user else 'None'}")
 
-    def _extract_user_id(self, event: Update) -> Optional[int]:
-        """Извлечь user_id из события"""
-        try:
-            if event.message and event.message.from_user:
-                return event.message.from_user.id
-            elif event.callback_query and event.callback_query.from_user:
-                return event.callback_query.from_user.id
-            elif event.chat_member and event.chat_member.new_chat_member:
-                return event.chat_member.new_chat_member.user.id
-            elif event.my_chat_member and event.my_chat_member.new_chat_member:
-                return event.my_chat_member.new_chat_member.user.id
-        except:
-            pass
+        elif isinstance(update_or_event, PreCheckoutQuery):
+            user = update_or_event.from_user
+            logger.debug(f"  PreCheckoutQuery: user_id={user.id if user else 'None'}")
+
+        elif isinstance(update_or_event, PollAnswer):
+            user = update_or_event.user
+            logger.debug(f"  PollAnswer: user_id={user.id if user else 'None'}")
+
+        else:
+            logger.warning(f"  Unsupported event type: {type(update_or_event).__name__}")
+            return None
+
+    except AttributeError as e:
+        logger.warning(f"  AttributeError in extract_user_info: {e}")
         return None
+    except Exception as e:
+        logger.error(f"  Unexpected error in extract_user_info: {e}", exc_info=True)
+        return None
+
+    if not user or not user.id:
+        logger.debug(f"  No valid user found: user={user}")
+        return None
+
+    # Очистка имени
+    from handlers.BotAutomaticWork.users.links.clean_user_name import clean_name
+    name = clean_name(user.full_name) if user.first_name else "Без имени"
+    username = user.username
+    chat_id = chat.id if chat else None
+
+    logger.debug(f"✅ Extracted: user_id={user.id}, name={name[:20]}, "
+                 f"username={username}, chat_id={chat_id}")
+
+    return user.id, name, username, chat, chat_id

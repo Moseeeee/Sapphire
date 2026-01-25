@@ -4,7 +4,6 @@ from aiogram.types import Update, ChatMemberUpdated
 from aiogram.enums import ChatMemberStatus
 import logging
 import asyncio
-
 from handlers.BotAutomaticWork.BotCreatedGlobal import get_all_bots
 from handlers.BotAutomaticWork.Gonfig.multi_bot_config import MultiBotConfig
 
@@ -45,15 +44,13 @@ class AutoTransferMiddleware(BaseMiddleware):
             chat_id = self._extract_chat_id(event)
             if chat_id:
                 active_bot = MultiBotConfig.get_active_bot_for_chat(chat_id)
-
                 if active_bot and active_bot['id'] != self.current_bot_config['id']:
                     # Этот чат обслуживает другой бот - игнорируем события
-                    #logger.debug(f"🚫 Чат {chat_id} обслуживается ботом {active_bot.get('name')}, игнорирую")
+                    # logger.debug(f"🚫 Чат {chat_id} обслуживается ботом {active_bot.get('name')}, игнорирую")
                     return None
 
             # Пропускаем дальше
             return await handler(event, data)
-
         except Exception as e:
             logger.error(f"❌ Ошибка в AutoTransferMiddleware: {e}", exc_info=True)
             return await handler(event, data)
@@ -68,25 +65,22 @@ class AutoTransferMiddleware(BaseMiddleware):
             old_status = event.old_chat_member.status
             new_status = event.new_chat_member.status
 
-           # logger.info(
-                #f"🤖 Статус бота {self.current_bot_config['name']} изменился в чате {chat.id}: {old_status} -> {new_status}")
+            # logger.info(
+            # f"🤖 Статус бота {self.current_bot_config['name']} изменился в чате {chat.id}: {old_status} -> {new_status}")
 
             # Бота ДОБАВИЛИ в чат
             if (old_status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED, None] and
                     new_status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR]):
-
                 async with self.lock:
                     # Проверяем, есть ли уже активный бот в этом чате
                     active_bot = MultiBotConfig.get_active_bot_for_chat(chat.id)
-
                     if active_bot:
                         # В чате уже есть активный бот - просим его выйти
                         await self._ask_old_bot_to_leave(chat.id, active_bot['id'])
 
                     # Текущий бот становится активным
                     MultiBotConfig.set_active_bot_for_chat(chat.id, self.current_bot_config['id'])
-
-                    #logger.info(f"🎯 Бот {self.current_bot_config['name']} стал активным в чате {chat.id}")
+                    # logger.info(f"🎯 Бот {self.current_bot_config['name']} стал активным в чате {chat.id}")
 
                     # Отправляем приветственное сообщение
                     await self._send_welcome_message(event)
@@ -94,12 +88,9 @@ class AutoTransferMiddleware(BaseMiddleware):
             # Бота УДАЛИЛИ из чата
             elif (old_status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR] and
                   new_status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED]):
-
                 # Удаляем бота из активных
                 MultiBotConfig.remove_bot_from_chat(chat.id, self.current_bot_config['id'])
-
-                #logger.info(f"👋 Бот {self.current_bot_config['name']} покинул чат {chat.id}")
-
+                # logger.info(f"👋 Бот {self.current_bot_config['name']} покинул чат {chat.id}")
         except Exception as e:
             logger.error(f"❌ Ошибка обработки my_chat_member: {e}", exc_info=True)
 
@@ -114,24 +105,19 @@ class AutoTransferMiddleware(BaseMiddleware):
             all_bots = get_all_bots()
             old_bot_token = old_bot_config['TOKEN']
             old_bot = all_bots.get(old_bot_token)
-
             if not old_bot:
                 return
 
             # Отправляем команду старому боту выйти
             try:
                 await old_bot.leave_chat(chat_id)
-                #logger.info(f"🚶 Старый бот {old_bot_config['name']} вышел из чата {chat_id}")
-
+                # logger.info(f"🚶 Старый бот {old_bot_config['name']} вышел из чата {chat_id}")
                 # Удаляем из активных
                 MultiBotConfig.remove_bot_from_chat(chat_id, old_bot_id)
-
             except Exception as e:
                 logger.warning(f"⚠️ Не удалось выгнать старого бота: {e}")
-
                 # Все равно меняем активного бота
-                #logger.info(f"📝 Чат {chat_id} передан новому боту, несмотря на ошибку")
-
+                # logger.info(f"📝 Чат {chat_id} передан новому боту, несмотря на ошибку")
         except Exception as e:
             logger.error(f"❌ Ошибка в _ask_old_bot_to_leave: {e}")
 
@@ -142,20 +128,18 @@ class AutoTransferMiddleware(BaseMiddleware):
                 return
 
             chat = event.chat
-
             welcome_text = (
-                f"🤖 <b>Бот {self.current_bot_config['name']} активирован!</b>\n\n"
+                f"🤖 <b>Бот {self.current_bot_config['name']} активирован!</b>\n"
                 f"✅ Теперь я обслуживаю этот чат.\n"
-                f"🔧 Все предыдущие боты были автоматически отключены.\n\n"
+                f"🔧 Все предыдущие боты были автоматически отключены.\n"
                 f"<i>Для смены бота просто добавьте другого бота из этой же системы.</i>"
             )
 
-            #await event.bot.send_message(
-                #chat_id=chat.id,
-                #text=welcome_text,
-                #parse_mode='HTML'
-            #)
-
+            # await event.bot.send_message(
+            # chat_id=chat.id,
+            # text=welcome_text,
+            # parse_mode='HTML'
+            # )
         except Exception as e:
             logger.error(f"❌ Ошибка отправки welcome сообщения: {e}")
 
@@ -180,7 +164,6 @@ class AutoTransferMiddleware(BaseMiddleware):
         """Запуск middleware"""
         if self.current_bot_config:
             logger.info(f"🚀 AutoTransferMiddleware запущен для {self.current_bot_config.get('name')}")
-
             # При старте бота, проверяем в каких чатах он администратор
             # и обновляем статус
             await self._sync_bot_status()
@@ -203,7 +186,6 @@ class AutoTransferMiddleware(BaseMiddleware):
                     logger.info(f"🤖 Бот {self.current_bot_config.get('name')} запущен как @{bot_info.username}")
                 except:
                     pass
-
         except Exception as e:
             logger.error(f"❌ Ошибка синхронизации статуса: {e}")
 

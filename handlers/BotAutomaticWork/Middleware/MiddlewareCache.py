@@ -56,7 +56,6 @@ class IgnoreCache:
                 else:
                     # Запись устарела, удаляем
                     del self.cache[user_id]
-
             self._stats['misses'] += 1
             return False
 
@@ -144,8 +143,8 @@ class IgnoreCache:
         async with self.lock:
             current_time = time.time()
             expired_count = 0
-
             users_to_remove = []
+
             for user_id, (ignored, timestamp) in self.cache.items():
                 if current_time - timestamp >= self.ttl:
                     users_to_remove.append(user_id)
@@ -185,7 +184,6 @@ class IgnoreCache:
         """Обновить кэш из базы данных"""
         try:
             from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
-
             pool = get_db_pool()
             async with pool.acquire() as conn:
                 # Получаем всех игнорируемых пользователей
@@ -195,7 +193,6 @@ class IgnoreCache:
                 # Обновляем кэш
                 await self.bulk_update(ignored_users)
                 logger.info(f"🔄 IgnoreCache refreshed from DB: {len(ignored_users)} users")
-
         except Exception as e:
             logger.error(f"❌ Error refreshing ignore cache from DB: {e}")
 

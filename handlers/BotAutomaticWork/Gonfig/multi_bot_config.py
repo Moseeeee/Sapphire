@@ -12,16 +12,15 @@ class MultiBotConfig:
 
     # ТОКЕНЫ БОТОВ
     BOTS = [
-        #{
-           # 'id': 'bot_1',
-          #  'name': 'Sapphire | Chat Manager',
-         #   'TOKEN': "8277713159:AAHUN9FtoPX02G2bNaOUb3HMRuE4LcZRYbY",
-        #},
         {
-            'id': 'bot_2',
-            'name': '🛠️ Sapphire Test Bot',
+            'id': '8277713159',
+            'name': 'Sapphire | Chat Manager',
             'TOKEN': "8020015583:AAG9OrL9l8QNwzcgqCWnd9LmapVMFGKU8Ag",
         },
+        #{
+         #   'id': '8020015583',
+          ## 'TOKEN': "8020015583:AAG9OrL9l8QNwzcgqCWnd9LmapVMFGKU8Ag",
+        #},
         #{
             #'id': 'bot_3',
             #'name': '👁️‍🗨️ Sanor Test Bot',

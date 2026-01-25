@@ -26,7 +26,7 @@ from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import r
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.checks.user_online_status import get_user_status
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 chatadmin = Router()
 user_pagination_data = {}
@@ -539,7 +539,7 @@ async def list_admins(m: Message):
     User_Id = m.from_user.id
 
     # Проверяем права доступа: босс-агенты пропускаются, остальные проходят проверку
-    if User_Id not in boss_agent and not await auto_check_AccessLevel_for_rang(User_Id, ChatId, 19):
+    if User_Id not in boss_agent and not await auto_check_AccessLevel_for_rang(User_Id, ChatId, 64):
         return
 
     try:

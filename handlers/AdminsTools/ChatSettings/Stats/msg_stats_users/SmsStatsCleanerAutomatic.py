@@ -7,11 +7,12 @@ logger = logging.getLogger(__name__)
 
 
 async def periodic_cleaner():
-    pool = get_db_pool()
     """
     Фоновая задача: каждые 60 минут чистит устаревшую статистику во всех чатах.
     Запускать один раз при старте приложения.
     """
+    pool = get_db_pool()
+
     while True:
         try:
             logger.info("Запуск периодической очистки статистики...")
@@ -20,8 +21,6 @@ async def periodic_cleaner():
             async with pool.acquire() as conn:
                 rows = await conn.fetch("SELECT DISTINCT chat_id FROM message_stats")
                 chat_ids = [row['chat_id'] for row in rows]
-
-
 
             # Чистим по каждому периоду для каждого чата
             for chat_id in chat_ids:
@@ -32,13 +31,10 @@ async def periodic_cleaner():
                         logger.error(f"Ошибка при очистке {period} для чата {chat_id}: {e}")
 
             logger.info("Периодическая очистка завершена")
-            return 'ok'
 
         except Exception as e:
-            logger.error(e, exc_info=True)
+            logger.error(f"Критическая ошибка в periodic_cleaner: {e}", exc_info=True)
 
-
-        # Ждём 1 час (3600 секунд)
+        # Ждём 1 час (3600 секунд) перед следующей итерацией
         await asyncio.sleep(3600)
-
-        return 'error'
+        #print(123)

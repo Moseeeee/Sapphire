@@ -7,21 +7,17 @@ from datetime import datetime
 from pytz import timezone
 from sqlalchemy.sql.functions import current_time
 
-from handlers.AgentsFeatures.payment.payment import check_user_access
-from handlers.BotAutomaticWork.Gonfig.config import boss_agent
+
 from handlers.AgentsFeatures.AntiSpam.AntiSpam import add_anti_spam, remove_anti_spam
 from handlers.AgentsFeatures.AntiSpam.AntiSpamDB import check_anti_spam, add_to_anti_spam, get_anti_spam_info, \
     remove_from_anti_spam
-from handlers.AgentsFeatures.ManagementAgents.ManagementAgentsDB import search_acting_agents
 from handlers.AgentsFeatures.ignoreUsers.ignore_managerDB import check_ignore, \
     add_to_ignore, get_ignore_info, remove_from_ignore
 from handlers.BotAutomaticWork.users.GenderUtils import g
-from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_agent_access
+from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_user_access
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
-from handlers.BotAutomaticWork.universal_bot import bot
-
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 as_ignore_router = Router()  # anti-spam router
 

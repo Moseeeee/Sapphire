@@ -558,9 +558,9 @@ async def dot_weather_handler(message: Message):
                              parse_mode="HTML")
 
 
-@weather_router.message(F.text.startswith(".погода кеш"))
-@weather_router.message(F.text.startswith("!погода кеш"))
-@weather_router.message(F.text.startswith("/погода кеш"))
+@weather_router.message(F.text.startswith(".кеш погоды"))
+@weather_router.message(F.text.startswith("!кеш погоды"))
+@weather_router.message(F.text.startswith("/кеш погоды"))
 async def weather_cache_handler(message: Message):
     if message.from_user.id != sanor_ID:
         return

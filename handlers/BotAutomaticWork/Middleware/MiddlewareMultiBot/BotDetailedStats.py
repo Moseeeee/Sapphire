@@ -1,4 +1,3 @@
-# handlers/BotAutomaticWork/Middleware/BotDetailedStats.py
 import time
 import logging
 import asyncio

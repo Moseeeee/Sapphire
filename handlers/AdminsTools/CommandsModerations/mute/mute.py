@@ -1,3 +1,4 @@
+
 import logging
 import re
 from typing import Union
@@ -20,7 +21,7 @@ from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang imp
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +192,7 @@ async def parse_time_improved(time_str: str):
 # Хендлеры команд мутов
 # ======================
 
-@mute.message(F.text.regexp(re.compile(r'^[!/.]муты период\s+\S+', re.IGNORECASE)))
+@mute.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?муты период\s+\S+', re.IGNORECASE)))
 async def set_default_mute_period(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 28):
@@ -232,7 +233,7 @@ async def set_default_mute_period(m: Message):
     await m.answer(f"✅ Время мута по умолчанию установлено: <b>{formatted}</b>", parse_mode="HTML")
 
 
-@mute.message(F.text.regexp(re.compile(r'^[!/.]размут(\s|$)', re.IGNORECASE)))
+@mute.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?размут(\s|$)', re.IGNORECASE)))
 async def unmute_users(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 25):
@@ -333,7 +334,7 @@ async def unmute_users(m: Message):
         await m.answer("❌ Ошибка при размуте")
 
 
-@mute.message(F.text.regexp(re.compile(r'^[!/.]мутлист(\s|$)', re.IGNORECASE)))
+@mute.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?мутлист(\s|$)', re.IGNORECASE)))
 async def mute_list(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 26):
@@ -433,7 +434,7 @@ async def mute_list(m: Message):
                    disable_web_page_preview=True)
 
 
-@mute.message(F.text.regexp(re.compile(r'^[!/.]мут инфо(\s|$)', re.IGNORECASE)))
+@mute.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?мут инфо(\s|$)', re.IGNORECASE)))
 async def mute_info(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 27):
@@ -527,7 +528,7 @@ async def mute_info(m: Message):
 
 
 
-@mute.message(F.text.regexp(re.compile(r'^[!/.]мут(\s|$)', re.IGNORECASE)))
+@mute.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?мут(\s|$)', re.IGNORECASE)))
 async def mute_users(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 25):

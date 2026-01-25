@@ -9,14 +9,6 @@ from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang imp
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    handlers=[
-        logging.FileHandler('sapphire.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
 UCS = Router()
@@ -98,6 +90,17 @@ async def format_stats(chat_id: int, period: str, page: int = 0) -> Tuple[str, I
 @UCS.message(F.text.split("\n", 1)[0].lower().startswith("!стата "))
 @UCS.message(F.text.split("\n", 1)[0].lower().startswith(".стата "))
 @UCS.message(F.text.split("\n", 1)[0].lower().startswith("/стата "))
+@UCS.message(F.text.split("\n", 1)[0].lower().startswith("стата "))
+
+@UCS.message(F.text.split("\n", 1)[0].lower().startswith("!статистика "))
+@UCS.message(F.text.split("\n", 1)[0].lower().startswith(".статистика "))
+@UCS.message(F.text.split("\n", 1)[0].lower().startswith("/статистика "))
+@UCS.message(F.text.split("\n", 1)[0].lower().startswith("статистика "))
+
+@UCS.message(F.text.split("\n", 1)[0].lower().startswith("!статистика за "))
+@UCS.message(F.text.split("\n", 1)[0].lower().startswith(".статистика за "))
+@UCS.message(F.text.split("\n", 1)[0].lower().startswith("/статистика за "))
+@UCS.message(F.text.split("\n", 1)[0].lower().startswith("статистика за "))
 async def cmd_stats(message: types.Message):
 
     if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 56):

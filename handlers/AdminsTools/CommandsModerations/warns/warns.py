@@ -31,7 +31,7 @@ from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang imp
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import get_random_text, rate_limit_with_cleanup
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 from handlers.BotAutomaticWork.universal_bot import bot
 from pytz import timezone as pytz_timezone
 
@@ -206,7 +206,7 @@ async def enforce_warn_limits(chat_id: int):
 # Хендлеры команд варнов
 # ======================
 
-@warn.message(F.text.regexp(re.compile(r'^[!/.]варнлист(\s|$)', re.IGNORECASE)))
+@warn.message(F.text.regexp(re.compile(r'^(?:[!./])?варнлист\s*$', re.IGNORECASE)))
 async def warn_list(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 30):
@@ -255,19 +255,26 @@ async def warn_list(m: Message):
                    disable_web_page_preview=True)
 
 
-@warn.message(F.text.regexp(re.compile(r'^[!/.]варны исход\s+\S+', re.IGNORECASE)))
+@warn.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?варны исход(?:$|\s+\S+)', re.IGNORECASE)))
 async def set_warn_outcome(m: Message):
-
-
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 33):
         return
 
-    # Удаляем префикс из команды
+    # Удаляем все префиксы из команды
     text = m.text.strip()
-    if text[0] in '!./':
-        text = text[1:].strip()
 
-    parts = text.split(maxsplit=2)
+    # Удаляем все возможные префиксы
+    if text.startswith(('!', '.', '/', '!:', '.:', '/:')):
+        # Находим первый пробел или конец префикса
+        for i in range(len(text)):
+            if text[i].isalpha() or text[i].isalnum():
+                text = text[i:].strip()
+                break
+
+    # Разделяем команду на части
+    parts = text.split(maxsplit=2)  # Максимум 3 части: "варны", "исход", "действие"
+
+    # Проверяем, указано ли действие
     if len(parts) < 3:
         await m.answer(
             "❌ Укажите исход при достижении лимита варнов.\n"
@@ -310,9 +317,8 @@ async def set_warn_outcome(m: Message):
                    parse_mode="HTML")
 
 
-@warn.message(F.text.regexp(re.compile(r'^[!/.]варны период\s+\S+', re.IGNORECASE)))
+@warn.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?варны период(?:$|\s+\S+)', re.IGNORECASE)))
 async def set_default_warn_period(m: Message):
-
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 31):
         return
 
@@ -321,7 +327,9 @@ async def set_default_warn_period(m: Message):
     if text[0] in '!./':
         text = text[1:].strip()
 
-    parts = text.split(maxsplit=2)
+    parts = text.split(maxsplit=2)  # Максимум 3 части: "варны", "период", "время"
+
+    # Проверяем, указано ли время
     if len(parts) < 3:
         await m.answer(
             "❌ Укажите длительность варна по умолчанию.\n"
@@ -346,7 +354,7 @@ async def set_default_warn_period(m: Message):
     await m.answer(f"✅ Время варна по умолчанию установлено: <b>{formatted}</b>", parse_mode="HTML")
 
 
-@warn.message(F.text.regexp(re.compile(r'^[!/.]варны лимит\s+\S+', re.IGNORECASE)))
+@warn.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?варны лимит(?:$|\s+\S+)', re.IGNORECASE)))
 async def set_warn_limit_cmd(m: Message):
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 32):
         return
@@ -356,7 +364,9 @@ async def set_warn_limit_cmd(m: Message):
     if text[0] in '!./':
         text = text[1:].strip()
 
-    parts = text.split(maxsplit=2)
+    parts = text.split(maxsplit=2)  # Максимум 3 части: "варны", "лимит", "число"
+
+    # Проверяем, указано ли число
     if len(parts) < 3:
         await m.answer(
             "❌ Укажите лимит варнов (от 1 до 100).\n"
@@ -395,8 +405,8 @@ async def set_warn_limit_cmd(m: Message):
         await m.answer("❌ Укажите корректное число для лимита.")
 
 
-@warn.message(F.text.regexp(re.compile(r'^[-]варн(\s|$)', re.IGNORECASE)))
-@warn.message(F.text.regexp(re.compile(r'^[!./]снять варн(\s|$)', re.IGNORECASE)))
+@warn.message(F.text.regexp(re.compile(r'^[-]варн', re.IGNORECASE)))
+@warn.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?снять варн', re.IGNORECASE)))
 async def unwarn_user(m: Message):
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 29):
         return
@@ -417,7 +427,7 @@ async def unwarn_user(m: Message):
     else:
         if len(parts) < 2:
             await m.answer(
-                "❌ Неверный формат!\nИспользуйте: <code>-варн {@username} [номер_варна]</code> или ответьте на сообщение",
+                "❌ Неверный формат!\nИспользуйте: <code>-варн {@username} [номер_варна (не обязательно)] </code> или ответьте на сообщение",
                 parse_mode="HTML"
             )
             return
@@ -455,7 +465,7 @@ async def unwarn_user(m: Message):
                        parse_mode='HTML', disable_web_page_preview=True)
 
 
-@warn.message(F.text.regexp(re.compile(r'^[!/.]варны\s+\S+', re.IGNORECASE)))
+@warn.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?варны\s+\S+', re.IGNORECASE)))
 async def user_warns(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 60):
@@ -576,7 +586,7 @@ async def user_warns(m: Message):
     )
 
 
-@warn.message(F.text.regexp(re.compile(r'^[+!/.]варн(\s|$)', re.IGNORECASE)))
+@warn.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?варн(\s|$)', re.IGNORECASE)))
 async def warn_user(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 29):

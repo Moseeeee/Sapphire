@@ -1,6 +1,13 @@
-import time
 import asyncio
-from typing import Dict, Any, List
+import time
+from typing import Dict, Any, List, Callable, Awaitable
+import logging
+from aiogram import BaseMiddleware
+from aiogram.types import Update
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError, TelegramRetryAfter, TelegramServerError, \
+    TelegramConflictError
+
+logger = logging.getLogger(__name__)
 
 
 # --- АСИНХРОННЫЙ СЧЕТЧИК СОБЫТИЙ ---
@@ -52,7 +59,6 @@ class AsyncEventCounter:
         async with self._lock:
             current_time = time.time()
             time_limit = current_time - period_seconds
-
             count = sum(1 for t in self.events.get(event_name, []) if t >= time_limit)
             return count
 
@@ -65,3 +71,49 @@ class AsyncEventCounter:
 
 
 global_counter = AsyncEventCounter()
+
+
+class GlobalCountersMiddleware(BaseMiddleware):
+    """Middleware для подсчета глобальной статистики и обработки ошибок"""
+
+    async def __call__(
+            self,
+            handler: Callable[[Update, Dict[str, Any]], Awaitable[Any]],
+            event: Update,
+            data: Dict[str, Any]
+    ) -> Any:
+        try:
+            # Статистика запросов
+            bot = data.get("bot")
+            if bot:
+                bot_id = getattr(bot, "id", "unknown")
+                # Здесь можно добавить логику подсчета запросов по ботам
+
+            # Выполняем обработку
+            result = await handler(event, data)
+            return result
+
+        except TelegramRetryAfter as e:
+            # Обработка FloodWait
+            await global_counter.add_event("flood_wait")
+            logger.warning(f"FloodWait: {e}. Спим {e.retry_after} секунд")
+            await asyncio.sleep(e.retry_after)
+            # Повторяем запрос
+            return await handler(event, data)
+
+        except (TelegramNetworkError, TelegramServerError, TelegramConflictError) as e:
+            # Обработка сетевых ошибок и ошибок сервера
+            await global_counter.add_event("errors")
+            logger.error(f"Сетевая ошибка или ошибка сервера: {e}")
+            # Можно добавить логику повторных попыток
+
+        except TelegramAPIError as e:
+            # Обработка других ошибок API Telegram
+            await global_counter.add_event("errors")
+            logger.error(f"Ошибка API Telegram: {e}")
+
+        except Exception as e:
+            # Обработка всех остальных исключений
+            await global_counter.add_event("errors")
+            logger.exception(f"Необработанное исключение: {e}")
+            # Можно отправить уведомление администратору

@@ -28,7 +28,7 @@ from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang imp
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 from handlers.BotAutomaticWork.universal_bot import bot
 
 bans = Router()
@@ -144,7 +144,7 @@ async def parse_time_improved_ban(time_str: str):
         return timedelta(seconds=total_seconds)
 
     # Пробуем еще раз стандартный парсинг на очищенной строке
-    cleaned = re.sub(r'[^\d\sчмнднсекгуаяитль]', '', time_str)
+    cleaned = re.sub(r'[^\d\sчмндсекгуаяитль]', '', time_str)
     if cleaned != time_str:
         parsed = parse_time_string(cleaned)
         if parsed is not None:
@@ -157,7 +157,7 @@ async def parse_time_improved_ban(time_str: str):
 # Хендлеры команд
 # ======================
 
-@bans.message(F.text.regexp(re.compile(r'^[!/.]баны период(\s|$)', re.IGNORECASE)))
+@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?баны период(\s|$)', re.IGNORECASE)))
 async def set_default_ban_period(m: Message):
 
     chat_id = m.chat.id
@@ -199,7 +199,7 @@ async def set_default_ban_period(m: Message):
     await m.answer(f"✅ Время бана по умолчанию установлено: <b>{formatted}</b>", parse_mode="HTML")
 
 
-@bans.message(F.text.regexp(re.compile(r'^[!/.](?:чс|бан)(\s|$)', re.IGNORECASE)))
+@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?(?:чс|бан)(\s|$)', re.IGNORECASE)))
 async def ban_users(m: Message):
     chat_id = m.chat.id
 
@@ -208,8 +208,11 @@ async def ban_users(m: Message):
 
     # Удаляем префикс из команды
     text = m.text.strip()
-    if text[0] in '!./':
-        text = text[1:].strip()
+    if text and text[0] in '!./':
+        text = text[1:].lstrip()
+        # Если после префикса сразу двоеточие, удаляем его тоже
+        if text.startswith(':'):
+            text = text[1:].lstrip()
 
     # Разделяем команду и причину по новой строке
     command_part, _, reason_part = text.partition('\n')
@@ -246,7 +249,7 @@ async def ban_users(m: Message):
             return
 
         # Пробуем найти пользователя в разных позициях
-        # Сначала смотрим первый элемент после команды
+        # Сначала смотрим первый элемент после команда
         potential_user = parts[1]
         resolved_id = await resolve_id(m, potential_user)
         if resolved_id:
@@ -391,7 +394,7 @@ async def ban_users(m: Message):
     # Если время не указано или не распознано, используем настройки по умолчанию
     if ban_duration is None:
         default_duration_str = await get_default_ban_duration(m.chat.id)
-        logger.info(f"Используем настройку по умолчанию: {default_duration_str}")
+        #logger.info(f"Используем настройку по умолчанию: {default_duration_str}")
 
         if default_duration_str is None:
             ban_duration = 'навсегда'
@@ -399,7 +402,6 @@ async def ban_users(m: Message):
             ban_duration = 'навсегда'
         else:
             # ФИКС: Проверяем тип данных
-            from datetime import timedelta
             if isinstance(default_duration_str, timedelta):
                 # Преобразуем timedelta в строку
                 total_seconds = default_duration_str.total_seconds()
@@ -466,7 +468,7 @@ async def ban_users(m: Message):
                        )
 
 
-@bans.message(F.text.regexp(re.compile(r'^[!/.]разбан(\s|$)', re.IGNORECASE)))
+@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?разбан(\s|$)', re.IGNORECASE)))
 async def unban_users(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 21):
@@ -621,7 +623,7 @@ async def unban_users(m: Message):
             await m.answer("❌ Ошибка при разбане")
 
 
-@bans.message(F.text.regexp(re.compile(r'^[!/.]банлист(\s|$)', re.IGNORECASE)))
+@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?банлист(\s|$)', re.IGNORECASE)))
 async def ban_list(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 22):
@@ -706,7 +708,7 @@ async def ban_list(m: Message):
                    disable_web_page_preview=True)
 
 
-@bans.message(F.text.regexp(re.compile(r'^[!/.]бан инфо(\s|$)', re.IGNORECASE)))
+@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?бан инфо(\s|$)', re.IGNORECASE)))
 async def ban_info(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 23):
@@ -801,7 +803,7 @@ async def ban_info(m: Message):
 # Новые команды для просмотра банов пользователя во всех чатах
 # ======================
 
-@bans.message(F.text.regexp(re.compile(r'^[!/.]мои баны(\s|$)', re.IGNORECASE)))
+@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?мои баны(\s|$)', re.IGNORECASE)))
 async def my_bans(m: Message):
 
     if m.chat.type != 'private':
@@ -910,7 +912,7 @@ async def my_bans(m: Message):
     )
 
 
-@bans.message(F.text.regexp(re.compile(r'^[!/.]баны\s+\S+', re.IGNORECASE)))
+@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?баны\s+\S+', re.IGNORECASE)))
 async def user_bans_all_chats(m: Message):
 
     if not await check_user_access(m.from_user.id, 1):

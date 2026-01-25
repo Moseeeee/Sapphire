@@ -2,7 +2,6 @@ import logging
 from datetime import datetime
 
 from aiogram import *
-from aiogram.enums import ChatType
 from aiogram.types import *
 
 from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.SmsStatsDB import get_user_stats
@@ -11,9 +10,9 @@ from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.checks.user_online_status import get_user_status
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global, user_link_with_pseudonym
 from handlers.BotAutomaticWork.users.usersDB import get_user_first_seen, get_user_full_data
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +22,7 @@ profile = Router()
 @profile.message(lambda m: m.text and m.text.lower().startswith("!профиль"))
 @profile.message(lambda m: m.text and m.text.lower().startswith(".профиль"))
 @profile.message(lambda m: m.text and m.text.lower().startswith("/профиль"))
+@profile.message(lambda m: m.text and m.text.lower().startswith("профиль"))
 async def check_user_profile(m: Message):
     if m.chat.type == 'private':
         return
@@ -73,7 +73,7 @@ async def check_user_profile(m: Message):
             date_str = first_seen.strftime("%d.%m.%Y")
             time_ago = format_time_ago(first_seen)
 
-        UserLink = await user_link_global(UserId)
+        UserLink = await user_link_with_pseudonym(UserId, m.chat.id)
         gender = await get_user_gender(UserId)
 
         # Получаем статистику сообщений пользователя

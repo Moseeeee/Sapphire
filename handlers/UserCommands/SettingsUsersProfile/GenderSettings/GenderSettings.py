@@ -1,8 +1,9 @@
+
 from aiogram import Router, F
 from aiogram.types import Message
 
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import update_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import update_user_gender
 
 GenderSettings = Router()
 

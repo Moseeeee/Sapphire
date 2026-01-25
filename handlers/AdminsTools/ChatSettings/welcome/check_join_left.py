@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from aiogram.enums import ChatMemberStatus
@@ -22,7 +23,7 @@ from handlers.AdminsTools.CommandsModerations.bans.ban import perform_ban
 from handlers.AgentsFeatures.AntiSpam.AntiSpamDB import check_anti_spam
 from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 from handlers.BotAutomaticWork.universal_bot import bot
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ def get_moscow_time() -> datetime:
 
 
 async def handle_join(event: ChatMemberUpdated):
+    await asyncio.sleep(0.4)
     try:
         chat_id = event.chat.id
         user = event.new_chat_member.user
@@ -55,11 +57,12 @@ async def handle_join(event: ChatMemberUpdated):
         # Обновляем базу данных
         await add_full_users_chats(chat_id, user_id, join_time)
 
-        user_link = await user_link_global(user_id)
-        admin_link = await user_link_global(admin.id) if admin else "Система"
 
         gender = await get_user_gender(user_id)
         gender_admin = await get_user_gender(user_id)
+
+        user_link = await user_link_global(user_id)
+        admin_link = await user_link_global(admin.id) if admin else "Система"
 
         antispam_status = await check_antispam_status(chat_id)
         if antispam_status == 'on':
@@ -132,14 +135,6 @@ async def handle_join(event: ChatMemberUpdated):
                     parse_mode='HTML',
                     disable_web_page_preview=True
                 )
-            else:
-                # Если нет текста приветствия и капча выключена
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"👋 Добро пожаловать, {user_link}!",
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
-                )
 
         # Запускаем капчу если включена
         if captcha_enabled:
@@ -157,6 +152,7 @@ async def handle_join(event: ChatMemberUpdated):
 
 
 async def handle_leave(event: ChatMemberUpdated):
+    await asyncio.sleep(0.4)
     try:
         chat_id = event.chat.id
         user = event.old_chat_member.user
@@ -167,13 +163,14 @@ async def handle_leave(event: ChatMemberUpdated):
         new_status = event.new_chat_member.status
         admin = event.from_user
 
-        user_link = await user_link_global(user_id)
 
         # Обновляем базу данных
         await add_full_users_chats_leave(chat_id, user_id, leave_time)
 
         gender = await get_user_gender(user_id)
         gender_admin = await get_user_gender(admin.id)
+
+        user_link = await user_link_global(user_id)
 
         # Определяем тип выхода
         if new_status == ChatMemberStatus.KICKED:

@@ -1,4 +1,3 @@
-# handlers/BotAutomaticWork/Middleware/BotStatsMiddleware.py
 import time
 import logging
 from typing import Callable, Awaitable, Dict, Any

@@ -7,18 +7,17 @@ from aiogram.filters import *
 from datetime import datetime
 from pytz import timezone
 
-from handlers.AgentsFeatures.payment.payment import check_user_access
-from handlers.BotAutomaticWork.Gonfig.config import boss_agent
+
 from handlers.AgentsFeatures.AntiSpam.AntiSpamDB import check_anti_spam, add_to_anti_spam, remove_from_anti_spam, \
     get_anti_spam_history, get_anti_spam_info, get_all_anti_spam_users
-from handlers.AgentsFeatures.ManagementAgents.ManagementAgentsDB import search_acting_agents
 
 from handlers.BotAutomaticWork.users.GenderUtils import g
-from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_agent_access
+from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_agent_access, \
+    check_user_access
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
-from handlers.UserCommands.GenderSettings.GenderSettingsDB import get_user_gender
+from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 
 as_router = Router()  # anti-spam router
@@ -109,9 +108,7 @@ async def add_anti_spam(msg: Message):
 #@as_router.message(Command(commands=['ас'], prefix='-'))
 async def remove_anti_spam(msg: Message):
     user_id = msg.from_user.id
-    agent_rang = await check_agent_access(user_id)
-    if agent_rang <= 1:
-        return
+    await check_user_access(user_id, 1)
 
     if msg.reply_to_message:
         target_user_id = msg.reply_to_message.from_user.id
