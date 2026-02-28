@@ -9,7 +9,8 @@ import pytz
 from typing import List
 
 from aiogram import Router, F
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, BotCommand, \
+    BotCommandScopeChat
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
 
@@ -18,32 +19,12 @@ from handlers.AdminsTools.ChatSettings.captcha.captchaDB import is_captcha_enabl
 from handlers.BotAutomaticWork.Gonfig.config import boss_agent, sanor_ID
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.ConnectDataBaseCache import load_full_db_to_cache, get_db_pool
 from handlers.BotAutomaticWork.parse_time_auto import parse_time_string
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.universal_bot import bot
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 #from test import create_rps_chart
 
 router = Router()
 logger = logging.getLogger(__name__)
-
-moscow_tz = pytz.timezone('Europe/Moscow')
-now_msk = datetime.now(moscow_tz)
-time = now_msk.hour
-day = now_msk.day
-mon = now_msk.month
-
-# Новогодняя ночь: 31 декабря, с 18:00 до 23:59
-if mon == 12 and day == 31 and 18 <= time < 24:
-    time1 = '🎄 Новогодняя ночь прекрасна!'
-# Новый год: 1 января, до обеда
-elif mon == 1 and day == 1 and 0 <= time < 14:
-    time1 = '🎆 С Новым Годом!'
-elif 6 <= time < 12:
-    time1 = '🌄 Доброе утро,'
-elif 12 <= time < 18:
-    time1 = '👋🏻 Доброго времени суток,'
-elif 18 <= time < 21:
-    time1 = '🌆 Добрый вечер,'
-else:
-    time1 = '🌃 Доброй ночи,'
 
 
 # ============ ФУНКЦИИ ДЛЯ ПОЛУЧЕНИЯ СТАТИСТИКИ ============
@@ -134,17 +115,17 @@ async def get_system_stats() -> str:
         # Форматируем список агентов
         if agents:
             agents_list = "\n".join([f"• {agent}" for agent in agents])
-            agents_text = f"<b>Активные агенты:</b>\n{agents_list}"
+            agents_text = f"<tg-emoji emoji-id='5201876149088558587'>👷</tg-emoji> <b>Активные агенты:</b>\n{agents_list}"
         else:
-            agents_text = "<b>Активные агенты:</b> Нет активных агентов"
+            agents_text = "<tg-emoji emoji-id='5201876149088558587'>👷</tg-emoji> <b>Активные агенты:</b> Нет активных агентов"
 
         stats_text = f"""
-<blockquote><b>📊 СТАТИСТИКА СИСТЕМЫ:</b>
+<blockquote><b><tg-emoji emoji-id='5231200819986047254'>📊</tg-emoji> СТАТИСТИКА СИСТЕМЫ:</b>
 
-👤 <b>Юзеров в базе:</b> {users_count}
-💬 <b>Чатов в базе:</b> {chats_count}
-🚫 <b>Юзеров в игноре:</b> {ignore_count}
-🛡️ <b>Юзеров в антиспаме:</b> {anti_spam_count}
+<tg-emoji emoji-id="5323381955008415410">👤</tg-emoji> <b>Юзеров в базе:</b> {users_count}
+<tg-emoji emoji-id="5465300082628763143">💬</tg-emoji> <b>Чатов в базе:</b> {chats_count}
+<tg-emoji emoji-id="5346131202774409949">😶</tg-emoji> <b>Юзеров в игноре:</b> {ignore_count}
+<tg-emoji emoji-id="5260293700088511294">🛡️</tg-emoji> <b>Юзеров в антиспаме:</b> {anti_spam_count}
 
 {agents_text}</blockquote>
 """
@@ -171,6 +152,27 @@ async def start_command(message: Message):
     try:
         if message.chat.type != 'private':
             return
+
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        now_msk = datetime.now(moscow_tz)
+        time = now_msk.hour
+        day = now_msk.day
+        mon = now_msk.month
+
+        # Новогодняя ночь: 31 декабря, с 18:00 до 23:59
+        if mon == 12 and day == 31 and 18 <= time < 24:
+            time1 = '🎄 Новогодняя ночь прекрасна!'
+        # Новый год: 1 января, до обеда
+        elif mon == 1 and day == 1 and 0 <= time < 14:
+            time1 = '🎆 С Новым Годом!'
+        elif 6 <= time < 12:
+            time1 = '<tg-emoji emoji-id="5866054599026152490">🌄</tg-emoji> Доброе утро,'
+        elif 12 <= time < 18:
+            time1 = '<tg-emoji emoji-id="5402477260982731644">🌄</tg-emoji> Доброго времени суток,'
+        elif 18 <= time < 21:
+            time1 = '<tg-emoji emoji-id="5924646916540337386">🌇</tg-emoji> Добрый вечер,'
+        else:
+            time1 = '<tg-emoji emoji-id="5451942498115020652">🌃</tg-emoji> Доброй ночи,'
 
         user = message.from_user
         if not user:
@@ -231,24 +233,6 @@ async def start_command(message: Message):
                 return  # Не показываем обычное меню
 
         # === Обычный запуск (/start без аргументов или с другим payload) ===
-        # Динамическое приветствие
-        now_msk = datetime.now(pytz.timezone('Europe/Moscow'))
-        hour = now_msk.hour
-        month = now_msk.month
-        day = now_msk.day
-
-        if month == 12 and day == 31 and 18 <= hour < 24:
-            time1 = '🎄 Новогодняя ночь прекрасна!'
-        elif month == 1 and day == 1 and 0 <= hour < 14:
-            time1 = '🎆 С Новым Годом!'
-        elif 6 <= hour < 12:
-            time1 = '🌄 Доброе утро,'
-        elif 12 <= hour < 18:
-            time1 = '👋🏻 Доброго времени суток,'
-        elif 18 <= hour < 21:
-            time1 = '🌆 Добрый вечер,'
-        else:
-            time1 = '🌃 Доброй ночи,'
 
         if user_id == sanor_ID:  # Убедитесь, что sanor_ID — это ID (int), а не список!
             stats_text = await get_system_stats()
@@ -265,17 +249,39 @@ async def start_command(message: Message):
                 disable_web_page_preview=True,
                 reply_markup=markup
             )
+
+            inline_commands = [
+                BotCommand(command="start", description="🔄 Запустить или перезапустить бота"),
+                BotCommand(command="commands", description="📖 Список команд бота"),
+                BotCommand(command="bot_active_5_min", description="🚀 Актив бота за 5 минут"),
+                BotCommand(command="ping", description="⏱️ Проверка отклика бота"),
+                BotCommand(command="full_chats_ids", description="🔗 Все чаты во вселенной Sapphire"),
+            ]
         else:
             await message.answer(
                 f"""<b>{time1} {user_link}!</b>
 
 <a href="https://t.me/+iwWRkgyHOwQ3ZjMy">Официальный канал</a> | <a href="https://teletype.in/@sap_sp/commands">Мой функционал</a>                    
-<blockquote>⚠️ Бот только-только запустился, поэтому есть некоторые неточности.
+<blockquote><tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Бот только-только запустился, поэтому есть некоторые неточности.
 Большая просьба сообщать о найденных ошибках в <a href="https://t.me/sap_sp_chat">Sapphire | Chat</a></blockquote>
 """,
                 parse_mode='HTML',
                 disable_web_page_preview=True
             )
+
+            inline_commands = [
+                BotCommand(command="start", description="🔄 Запустить или перезапустить бота"),
+                BotCommand(command="commands", description="📖 Список команд бота"),
+                BotCommand(command="my_bans", description="⛔️ Список ваших банов во вселенной сапфира"),
+                # BotCommand(command="resources", description="🔗 Полезные ссылки/гайды"),
+            ]
+
+        chat_id = message.chat.id
+
+        await bot.set_my_commands(
+            commands=inline_commands,
+            scope=BotCommandScopeChat(chat_id=chat_id)
+        )
 
     except Exception as e:
         logger.error(f"Ошибка в start_command: {e}", exc_info=True)
@@ -402,6 +408,10 @@ async def show_system_status(message: Message):
 # ============ CALLBACK ОБРАБОТЧИКИ ============
 @router.callback_query(F.data == 'system_menu')
 async def system_menu_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Главное меню управления системой"""
     try:
         await call.answer()
@@ -431,6 +441,10 @@ async def system_menu_handler(call: CallbackQuery):
 
 @router.callback_query(F.data == 'system_status')
 async def system_status_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Показать статус системы"""
     try:
         await call.answer("🔄 Получаем данные...")
@@ -487,6 +501,10 @@ async def system_status_handler(call: CallbackQuery):
 
 @router.callback_query(F.data == 'restart_app_menu')
 async def restart_app_menu_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Меню перезапуска приложения"""
     try:
         await call.answer()
@@ -516,6 +534,10 @@ async def restart_app_menu_handler(call: CallbackQuery):
 
 @router.callback_query(F.data == 'confirm_restart_app')
 async def confirm_restart_app_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Подтверждение перезапуска приложения"""
     try:
         user_link = await user_link_global(call.from_user.id)
@@ -538,6 +560,10 @@ async def confirm_restart_app_handler(call: CallbackQuery):
 
 @router.callback_query(F.data == 'restart_server_menu')
 async def restart_server_menu_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Меню перезагрузки сервера"""
     try:
         await call.answer()
@@ -568,6 +594,10 @@ async def restart_server_menu_handler(call: CallbackQuery):
 
 @router.callback_query(F.data == 'confirm_restart_server')
 async def confirm_restart_server_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Подтверждение перезагрузки сервера"""
     try:
         user_link = await user_link_global(call.from_user.id)
@@ -592,6 +622,10 @@ async def confirm_restart_server_handler(call: CallbackQuery):
 
 @router.callback_query(F.data == 'clear_cache_menu')
 async def clear_cache_menu_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Меню очистки кэша"""
     try:
         await call.answer()
@@ -621,6 +655,10 @@ async def clear_cache_menu_handler(call: CallbackQuery):
 
 @router.callback_query(F.data == 'clear_all_cache')
 async def clear_all_cache_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Очистка всех кэшей"""
     try:
         await call.answer("🧹 Очищаем кэш...")
@@ -646,6 +684,10 @@ async def clear_all_cache_handler(call: CallbackQuery):
 # ============ СТАРЫЕ КНОПКИ ============
 @router.callback_query(F.data == 'restart_bot')
 async def restart_bot_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Перезагрузка бота (старая кнопка)"""
     try:
         await call.answer("🔄 Перезагружаем...")
@@ -658,6 +700,10 @@ async def restart_bot_handler(call: CallbackQuery):
 
 @router.callback_query(F.data == 'reload_cache')
 async def reload_cache_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Перезагрузка кэша (старая кнопка)"""
     try:
         await call.answer("🐝 Перезагружаем кэш...")
@@ -671,6 +717,10 @@ async def reload_cache_handler(call: CallbackQuery):
 
 @router.callback_query(F.data == 'back_to_main')
 async def back_to_main_handler(call: CallbackQuery):
+
+    if call.from_user.id != sanor_ID:
+        return
+
     """Возврат к главному меню"""
     try:
         await call.answer()
@@ -678,7 +728,7 @@ async def back_to_main_handler(call: CallbackQuery):
         user_id = call.from_user.id
         user_link = await user_link_global(user_id)
 
-        if user_id in boss_agent:
+        if call.from_user.id == sanor_ID:
             # Получаем статистику для администраторов
             stats_text = await get_system_stats()
 
@@ -687,6 +737,27 @@ async def back_to_main_handler(call: CallbackQuery):
                 [InlineKeyboardButton(text='🐝 Перезагрузить кеш', callback_data='reload_cache')],
                 [InlineKeyboardButton(text='⚙️ Управление системой', callback_data='system_menu')]
             ])
+
+            moscow_tz = pytz.timezone('Europe/Moscow')
+            now_msk = datetime.now(moscow_tz)
+            time = now_msk.hour
+            day = now_msk.day
+            mon = now_msk.month
+
+            # Новогодняя ночь: 31 декабря, с 18:00 до 23:59
+            if mon == 12 and day == 31 and 18 <= time < 24:
+                time1 = '🎄 Новогодняя ночь прекрасна!'
+            # Новый год: 1 января, до обеда
+            elif mon == 1 and day == 1 and 0 <= time < 14:
+                time1 = '🎆 С Новым Годом!'
+            elif 6 <= time < 12:
+                time1 = '<tg-emoji emoji-id="5866054599026152490">🌄</tg-emoji> Доброе утро,'
+            elif 12 <= time < 18:
+                time1 = '<tg-emoji emoji-id="5402477260982731644">🌄</tg-emoji> Доброго времени суток,'
+            elif 18 <= time < 21:
+                time1 = '<tg-emoji emoji-id="5924646916540337386">🌇</tg-emoji> Добрый вечер,'
+            else:
+                time1 = '<tg-emoji emoji-id="5451942498115020652">🌃</tg-emoji> Доброй ночи,'
 
             await call.message.edit_text(
                 f"""<b>{time1} {user_link}</b>

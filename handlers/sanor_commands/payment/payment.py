@@ -7,7 +7,7 @@ from aiogram import Router, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pytz import timezone
 
-from handlers.AgentsFeatures.payment.paymentDB import (
+from handlers.sanor_commands.payment.paymentDB import (
     get_current_datetime, add_to_bag, get_user_bag, remove_from_bag,
     get_bag_info, get_total_sapphires, get_top_bags, get_recent_transfers,
     transfer_sapphires, get_formatted_bag_history, OPERATION_TYPES,
@@ -19,7 +19,7 @@ from handlers.BotAutomaticWork.universal_bot import bot
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_user_access
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 
 # Создаем роутер
 sapphires_router = Router()

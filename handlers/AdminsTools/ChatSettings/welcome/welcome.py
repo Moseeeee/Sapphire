@@ -18,7 +18,7 @@ from handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovalsDB import get_
 from handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovalsUtils import contains_links, get_moderation_keyboard
 from handlers.BotAutomaticWork.AddChatsBot.link.chats_global_link import chat_global_link
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.BotAutomaticWork.universal_bot import bot
 
 

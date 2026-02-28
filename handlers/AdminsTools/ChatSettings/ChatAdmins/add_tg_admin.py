@@ -16,7 +16,7 @@ from handlers.BotAutomaticWork.universal_bot import bot
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 
 tg_admin_management = Router()
 

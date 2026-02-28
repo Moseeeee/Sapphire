@@ -135,7 +135,7 @@ async def enable_disable_command(m: types.Message, chat_id: int, command_id: int
     await update_command_access(chat_id, command_id, target_rang)
 
     action_text = "включена" if is_enable else "выключена"
-    await m.answer(f'✅ Команда «<code>{command_info["CommandName"]}</code>» {action_text} (ранг {target_rang})')
+    await m.answer(f'✅ Команда «<code>{command_info["CommandName"]}</code>» {action_text}')
 
 
 async def enable_disable_under_section(m: types.Message, chat_id: int, under_section_id: int, is_enable: bool):
@@ -190,7 +190,7 @@ async def set_command_rang(m: types.Message, chat_id: int, command_id: int, rang
 
     await update_command_access(chat_id, command_id, rang)
 
-    status_text = "выключена" if rang == 6 else f"установлен ранг {rang}"
+    status_text = "выключена" if rang == 6 else f"установлена на ранг {rang}"
     await m.answer(f'✅ Команда {command_info["CommandName"]} {status_text}')
 
 
@@ -419,6 +419,7 @@ async def check_commands_structure(m: types.Message):
 @CheckDk.message(lambda m: m.text and m.text.lower().startswith('!чек рк'))
 @CheckDk.message(lambda m: m.text and m.text.lower().startswith('.чек рк'))
 @CheckDk.message(lambda m: m.text and m.text.lower().startswith('/чек рк'))
+@CheckDk.message(lambda m: m.text and m.text.lower().startswith('чек рк'))
 async def check_commands_handler(m: types.Message):
     if m.chat.type == 'private':
         return

@@ -1,6 +1,7 @@
 import time
 
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import *
 from datetime import datetime
 import logging, asyncio
@@ -100,6 +101,7 @@ async def process_ping_command(message: Message, command_type: str):
     (F.text.split("\n", 1)[0].lower().strip() == "!пинг") |
     (F.text.split("\n", 1)[0].lower().strip() == "сап пинг")
 )
+@pingin.message(Command("ping"))
 async def ping(message: Message):
     await process_ping_command(message, "ping")
 

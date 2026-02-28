@@ -67,7 +67,7 @@ async def bot_added_to_chat(event: ChatMemberUpdated) -> None:
 
         if not str(event.chat.id).startswith("-100"):
             await event.answer(
-                '<b>⚠️ Чат не является супер-чатом.</b>\n'
+                '<b><tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Чат не является супер-чатом.</b>\n'
                 'Обновите статус группы с обычного чата на супер-чат.\n\n'
                 '<i>Один из способов:</i>\n'
                 'Включите анонимность и сохраните настройки, после отключите и добавьте бота.\n\n'
@@ -118,7 +118,7 @@ async def bot_added_to_chat(event: ChatMemberUpdated) -> None:
                          'Вы добавили меня сразу администратором чата, поэтому я готов приступить к работе!\n\n'
                          '<a href="https://t.me/+iwWRkgyHOwQ3ZjMy">Официальный канал</a> | '
                          '<a href="https://teletype.in/@sap_sp/commands">Мой функционал</a>\n'
-                         '<blockquote>⚠️ Бот только-только запустился, поэтому есть некоторые неточности.\n'
+                         '<blockquote><tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Бот только-только запустился, поэтому есть некоторые неточности.\n'
                          'Большая просьба сообщать о найденных ошибках в <a href="https://t.me/sap_sp_chat">Sapphire | Chat</a></blockquote>',
                     disable_web_page_preview=True,
                     parse_mode='HTML',
@@ -129,7 +129,7 @@ async def bot_added_to_chat(event: ChatMemberUpdated) -> None:
                     chat_id=chat_id,
                     text=f'<b>{greeting}, {chat_title}!</b>\n'
                     'К сожалению, я не могу начать модерировать чат, пока у меня не будет прав администратора. Мне нужны все права кроме анонимности и управлением видеочатом.\n\n'
-                    '<blockquote>⚠️ Бот только-только запустился, поэтому есть некоторые неточности.\n'
+                    '<blockquote><tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Бот только-только запустился, поэтому есть некоторые неточности.\n'
                     'Большая просьба сообщать о найденных ошибках в <a href="https://t.me/sap_sp_chat">Sapphire | Chat</a></blockquote>',
                     disable_web_page_preview=True,
                     parse_mode='HTML',
@@ -179,9 +179,9 @@ async def adminka(event: ChatMemberUpdated):
 
     await bot.send_message(
         chat_id=event.chat.id,
-        text='🤩 <b>Спасибо за права администратора!</b>\n'
+        text='<tg-emoji emoji-id="5190763359296826599">🤩</tg-emoji> <b>Спасибо за права администратора!</b>\n'
              'Теперь весь мой функционал доступен.\n\n'
-             '<blockquote>⚠️ Бот только-только запустился, поэтому есть некоторые неточности.\n'
+             '<blockquote><tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Бот только-только запустился, поэтому есть некоторые неточности.\n'
              'Большая просьба сообщать о найденных ошибках в <a href="https://t.me/sap_sp_chat">Sapphire | Chat</a></blockquote>',
         parse_mode='HTML',
         reply_markup=start_markup
@@ -200,7 +200,7 @@ async def not_adminka(event: ChatMemberUpdated):
 
     await bot.send_message(
         chat_id=event.chat.id,
-        text="""☹️ <b>К сожалению, меня сняли с должности администратора!</b>\nБез прав администратора я как рыба на суше. 🐟""",
+        text="""<tg-emoji emoji-id="5345805601303700386">☹️</tg-emoji> <b>К сожалению, меня сняли с должности администратора!</b>\nБез прав администратора я как рыба на суше. <tg-emoji emoji-id="5382210409824525356">🐟</tg-emoji>""",
         parse_mode='HTML',
         reply_markup=markup
     )
@@ -211,7 +211,7 @@ async def not_adminka(event: ChatMemberUpdated):
     ])
     await bot.send_message(
         chat_id=event.chat.id,
-        text='😢 Прощайте, без прав администратора я бесполезен.',
+        text='<tg-emoji emoji-id="5248987078422706914">😢</tg-emoji> Прощайте, без прав администратора я бесполезен.',
         reply_markup=markup
     )
     await bot.leave_chat(event.chat.id)
@@ -229,7 +229,7 @@ async def install_chats_bot(call: CallbackQuery):
         f"""❔<b> Туториал как выдать права администратора боту:</b>
 <i>Заходим в профиль чата -> Android: нажимаем на карандаш | Пк: ︙ -> управление группой | Ios: изм. -> администраторы -> добавить администратора -> выбираете @{bot_info.username}</i>
 
-👇🏻 Или просто нажмите на кнопку ниже и в появившемся списке выберите этот чат.""",
+<tg-emoji emoji-id="5470177992950946662">👇</tg-emoji> Или просто нажмите на кнопку ниже и в появившемся списке выберите этот чат.""",
         parse_mode='HTML',
         disable_web_page_preview=True,
         reply_markup=markup
@@ -319,7 +319,7 @@ async def back_to_main(call: CallbackQuery):
     await call.message.edit_text(
         text=f'<b>{greeting}, {call.message.chat.title if call.message.chat else "участники чата"}!</b>\n'
              '\n\n'
-             '👇🏻 Может быть полезно тем, кто пользуется ботом в первый раз\n',
+             '<tg-emoji emoji-id="5470177992950946662">👇</tg-emoji> Может быть полезно тем, кто пользуется ботом в первый раз\n',
         disable_web_page_preview=True,
         parse_mode='HTML',
         reply_markup=start_markup

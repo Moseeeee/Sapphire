@@ -12,7 +12,7 @@ from aiogram.types import (
 from handlers.BotAutomaticWork.Gonfig.config import sanor_ID
 from handlers.BotAutomaticWork.universal_bot import bot
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 
 agent_admin_management = Router()
 

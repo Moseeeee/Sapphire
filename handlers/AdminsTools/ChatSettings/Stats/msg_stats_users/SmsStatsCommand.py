@@ -1,13 +1,19 @@
 import logging
-from aiogram import Router, types, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.SmsStatsDB import get_stats
-from typing import Tuple
+import re
+from typing import Tuple, Dict
 
+from aiogram import Router, types, F
+from aiogram.filters import Command, CommandObject
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.SmsStatsDB import get_stats, save_message_batch, \
+    get_user_stats
+from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.msg_stats_cache import MESSAGE_CACHE
+from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_with_pseudonym
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +76,7 @@ async def format_stats(chat_id: int, period: str, page: int = 0) -> Tuple[str, I
     lines = []
     for i, (user_id, _, count) in enumerate(page_stats, start=start + 1):
         try:
-            mention = await user_link_global(user_id)
+            mention = await user_link_with_pseudonym(user_id, chat_id)
         except:
             mention = f"ID {user_id}"
         lines.append(f"{i}. {mention} — {count}")
@@ -156,3 +162,5 @@ async def cb_stats(callback: types.CallbackQuery):
     text, kb = await format_stats(chat_id, period, page)
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True)
     await callback.answer()
+
+

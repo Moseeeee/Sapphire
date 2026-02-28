@@ -1,10 +1,10 @@
 import logging
 import re
 from typing import Optional, Tuple, Union
-from urllib.parse import urlparse, parse_qs, parse_qsl
+from urllib.parse import urlparse, parse_qsl
 
 from handlers.BotAutomaticWork.users.checks.check_user_idDB import check_username
-from handlers.BotAutomaticWork.users.links.users_global_linkDB import user_exists_in_db
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_linkDB import user_exists_in_db
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,8 @@
 import re
+from typing import List, Dict
+
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
 def contains_links(text: str) -> bool:
@@ -47,16 +50,41 @@ def get_moderation_keyboard(chat_id: int, user_id: int, content_type: str):
         ]
     ])
 
-def get_note_moderation_keyboard(chat_id: int, user_id: int, notes_name: str):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="✅ Одобрить",
-                callback_data=f"approve_note_{chat_id}_{user_id}_{notes_name}"
-            ),
-            InlineKeyboardButton(
-                text="❌ Отклонить",
-                callback_data=f"reject_note_{chat_id}_{user_id}_{notes_name}"
-            )
-        ]
-    ])
+
+def get_note_moderation_keyboard(chat_id: int, user_id: int, note_name: str, is_edit: bool = False):
+    """Создает клавиатуру для модерации заметки"""
+    builder = InlineKeyboardBuilder()
+
+    builder.button(
+        text="✅ Одобрить",
+        callback_data=f"approve_note:{chat_id}:{user_id}:{note_name}"
+    )
+    builder.button(
+        text="❌ Отклонить",
+        callback_data=f"reject_note:{chat_id}:{user_id}:{note_name}"
+    )
+
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def get_first_comment_moderation_keyboard(channel_id: int, user_id: int):
+    """Создает клавиатуру для модерации первого комментария"""
+    builder = InlineKeyboardBuilder()
+
+    builder.button(
+        text="✅ Одобрить",
+        callback_data=f"approve_first_comment:{channel_id}:{user_id}"
+    )
+    builder.button(
+        text="❌ Отклонить",
+        callback_data=f"reject_first_comment:{channel_id}:{user_id}"
+    )
+
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def extract_urls_from_buttons(buttons: List[Dict[str, str]]) -> List[str]:
+    """Извлекает все URL из кнопок"""
+    return [btn['url'] for btn in buttons]

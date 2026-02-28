@@ -9,7 +9,7 @@ from handlers.AdminsTools.CommandsModerations.warns.warnsDB import clear_expired
 from handlers.AdminsTools.CommandsModerations.mute.muteDB import remove_mute_info
 from handlers.AdminsTools.CommandsModerations.bans.banDB import remove_ban_info
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.BotAutomaticWork.universal_bot import bot
 
 

@@ -1,14 +1,14 @@
+import logging
 import re
+from datetime import timedelta, datetime
 from typing import Union
 
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import *
 from pytz import timezone
 
-from handlers.AgentsFeatures.payment.payment import check_user_access
-from handlers.BotAutomaticWork.Gonfig.config import boss_agent
-from datetime import datetime, timedelta
-import logging
+from handlers.AdminsTools.ChatSettings.ChatAdmins.ChatAdmins import is_telegram_owner
 from handlers.AdminsTools.ChatSettings.ChatAdmins.ChatAdminsDB import check_admin_for_rang
 from handlers.AdminsTools.CommandsModerations.bans.banDB import (update_ban_info_type,
                                                                  update_ban_info,
@@ -20,16 +20,17 @@ from handlers.AdminsTools.CommandsModerations.bans.banDB import (update_ban_info
                                                                  get_total_bans_count,
                                                                  get_ban_details, get_user_bans_all_chats,
                                                                  get_user_active_bans_count)
-from handlers.AdminsTools.ChatSettings.ChatAdmins.ChatAdmins import is_telegram_owner
 from handlers.BotAutomaticWork.AddChatsBot.link.chats_global_link import chat_global_link
+from handlers.BotAutomaticWork.Gonfig.config import boss_agent
 from handlers.BotAutomaticWork.parse_time_auto import format_duration, parse_time_string
+from handlers.BotAutomaticWork.universal_bot import bot
 from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
-from handlers.BotAutomaticWork.universal_bot import bot
+from handlers.sanor_commands.payment.payment import check_user_access
 
 bans = Router()
 
@@ -198,274 +199,6 @@ async def set_default_ban_period(m: Message):
     formatted = format_duration(parsed_duration)
     await m.answer(f"✅ Время бана по умолчанию установлено: <b>{formatted}</b>", parse_mode="HTML")
 
-
-@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?(?:чс|бан)(\s|$)', re.IGNORECASE)))
-async def ban_users(m: Message):
-    chat_id = m.chat.id
-
-    if not await auto_check_AccessLevel_for_rang(m.from_user.id, chat_id, 21):
-        return
-
-    # Удаляем префикс из команды
-    text = m.text.strip()
-    if text and text[0] in '!./':
-        text = text[1:].lstrip()
-        # Если после префикса сразу двоеточие, удаляем его тоже
-        if text.startswith(':'):
-            text = text[1:].lstrip()
-
-    # Разделяем команду и причину по новой строке
-    command_part, _, reason_part = text.partition('\n')
-
-    # Убираем начальные/конечные пробелы
-    command_part = command_part.strip()
-    reason = reason_part.strip() if reason_part.strip() else "Не указана"
-
-    # Разбиваем команду на части
-    parts = command_part.split()
-    # logger.info(f"Части команды: {parts}")
-
-    UserId = None
-    time_str = None
-
-    # Если это ответ на сообщение
-    if m.reply_to_message:
-        UserId = m.reply_to_message.from_user.id
-        # Ищем время в частях после команды (если есть)
-        time_parts = []
-        if len(parts) > 1:
-            time_parts = parts[1:]
-        time_str = ' '.join(time_parts) if time_parts else None
-    else:
-        # Если не ответ на сообщение - анализируем команду
-        if len(parts) < 2:
-            await m.reply('⚠️ Пользователь не указан!\n\n'
-                          'Используйте один из способов:\n'
-                          '1. Ответьте на сообщение пользователя\n'
-                          '2. Укажите @username или ID пользователя\n'
-                          'Пример: <code>/бан @username 1ч</code>\n'
-                          '<code>причина с новой строки</code>',
-                          parse_mode='HTML')
-            return
-
-        # Пробуем найти пользователя в разных позициях
-        # Сначала смотрим первый элемент после команда
-        potential_user = parts[1]
-        resolved_id = await resolve_id(m, potential_user)
-        if resolved_id:
-            UserId = resolved_id
-            # Время может быть дальше
-            if len(parts) > 2:
-                time_str = ' '.join(parts[2:])
-        else:
-            # Первый элемент не пользователь - может быть сначала время, потом пользователь
-            # Например: "бан 4 часа @user"
-            # Пробуем найти пользователя дальше
-            for i in range(2, len(parts)):
-                potential_user = parts[i]
-                resolved_id = await resolve_id(m, potential_user)
-                if resolved_id:
-                    UserId = resolved_id
-                    # Время - это часть перед пользователем
-                    time_str = ' '.join(parts[1:i])
-                    break
-
-        # Если не нашли пользователя
-        if not UserId:
-            # Пробуем последний элемент как пользователя
-            potential_user = parts[-1]
-            resolved_id = await resolve_id(m, potential_user)
-            if resolved_id:
-                UserId = resolved_id
-                # Время - это всё перед последним элементом
-                time_str = ' '.join(parts[1:-1])
-
-        # Если все еще не нашли пользователя
-        if not UserId:
-            await m.reply('⚠️ Пользователь не указан или не найден!\n\n'
-                          'Используйте один из способов:\n'
-                          '1. Ответьте на сообщение пользователя\n'
-                          '2. Укажите @username или ID пользователя\n'
-                          'Пример: <code>/бан @username 1ч</code>\n'
-                          '<code>причина с новой строки</code>',
-                          parse_mode='HTML')
-            return
-
-    # Логируем найденные данные
-    # logger.info(f"UserID: {UserId}, Time string: '{time_str}', Reason: '{reason}'")
-
-    # Если причина указана с новой строки, обрезаем ее до 200 символов
-    if reason != "Не указана":
-        reason = reason[:200]
-        msg_text = f'\n💬 Причина: {reason}'
-    else:
-        msg_text = ""
-
-    # ========== ПРОВЕРКА РАНГОВ ==========
-    try:
-        ManagementAdminId = m.from_user.id
-        UserRang = await check_admin_for_rang(UserId, chat_id)
-        ManagementRang = await check_admin_for_rang(ManagementAdminId, chat_id)
-
-        # Если целевой пользователь является администратором
-        if UserRang > 0:
-            # Босс-агенты имеют полную власть
-            if ManagementAdminId not in boss_agent:
-                # Проверяем, является ли управляющий Telegram-владельцем
-                is_tg_owner = await is_telegram_owner(bot, chat_id, ManagementAdminId)
-
-                if not is_tg_owner:
-                    if UserRang >= ManagementRang:
-                        user_link = await user_link_global(UserId)
-                        admin_link = await user_link_global(ManagementAdminId)
-
-                        # Шутливые ответы в зависимости от ситуации
-                        if UserRang == ManagementRang:
-                            await m.answer(
-                                f"😂 {admin_link}, вы пытаетесь заблокировать администратора такого же ранга, как вы!\n",
-                                parse_mode='HTML',
-                                disable_web_page_preview=True
-                            )
-                        else:
-                            await m.answer(
-                                f"😏 {admin_link}, вы пытаетесь заблокировать администратора высшего ранга!\n",
-                                parse_mode='HTML',
-                                disable_web_page_preview=True
-                            )
-                        return
-    except Exception as e:
-        logger.error(e, exc_info=True)
-        # В случае ошибки продолжаем выполнение
-    # ========== КОНЕЦ ПРОВЕРКИ РАНГОВ ==========
-
-    # Остальная логика проверок (админы, владелец и т.д.)
-    admins = await bot.get_chat_administrators(chat_id)
-
-    if not UserId:
-        await m.reply('⚠️ Пользователь не указан или указан не верно.\nПравильный вид команды: бан @')
-        return
-
-    if UserId in [admin.user.id for admin in admins if admin.status == 'creator']:
-        await m.reply('❎ Владельца чата нельзя заблокировать.')
-        return
-
-    if UserId in [admin.user.id for admin in admins]:
-        await m.reply('❎ Этот администратор не может быть заблокирован.')
-        return
-
-    if UserId == m.from_user.id:
-        await m.reply('❎ Вы пытались заблокировать себя.')
-        await m.answer_sticker(
-            sticker='CAACAgIAAxkBAAEPgyNo4WXlQeKd729gw8WbZ_AFUJjSsQACCwEAAladvQpOseemCPvtSTYE')
-        return
-
-    if UserId == chat_id:
-        await m.reply('❎ Нельзя заблокировать чат.')
-        return
-
-    chat_info = await bot.get_chat(chat_id)
-    linked_chat_id = chat_info.linked_chat_id
-
-    if (
-            m.reply_to_message and m.reply_to_message.sender_chat
-            and m.reply_to_message.sender_chat.id == linked_chat_id
-    ):
-        await m.reply('❎ Нельзя забанить привязанный канал!')
-        return
-
-    # Определяем длительность бана
-    ban_duration = None
-    if time_str:
-        logger.info(f"Парсим время: '{time_str}'")
-
-        # Проверяем специальные случаи "навсегда"
-        if isinstance(time_str, str) and time_str.lower() in ["навсегда", "permanent", "forever", "навечно", "вечно"]:
-            ban_duration = 'навсегда'
-            logger.info("Установлен вечный бан")
-        else:
-            # Пробуем распарсить время
-            ban_duration = parse_time_string(time_str)
-
-            if ban_duration is None:
-                # Пробуем улучшенный парсинг (как в мутах)
-                logger.info("Стандартный парсинг не удался, пробуем улучшенный")
-                ban_duration = await parse_time_improved_ban(time_str)
-
-    # Если время не указано или не распознано, используем настройки по умолчанию
-    if ban_duration is None:
-        default_duration_str = await get_default_ban_duration(m.chat.id)
-        #logger.info(f"Используем настройку по умолчанию: {default_duration_str}")
-
-        if default_duration_str is None:
-            ban_duration = 'навсегда'
-        elif default_duration_str == "permanent":
-            ban_duration = 'навсегда'
-        else:
-            # ФИКС: Проверяем тип данных
-            if isinstance(default_duration_str, timedelta):
-                # Преобразуем timedelta в строку
-                total_seconds = default_duration_str.total_seconds()
-                hours = int(total_seconds // 3600)
-                minutes = int((total_seconds % 3600) // 60)
-
-                if hours > 0:
-                    if minutes > 0:
-                        default_duration_str = f"{hours}ч {minutes}м"
-                    else:
-                        default_duration_str = f"{hours}ч"
-                elif minutes > 0:
-                    default_duration_str = f"{minutes}м"
-                else:
-                    default_duration_str = f"{int(total_seconds)}с"
-
-            ban_duration = parse_time_string(default_duration_str)
-            if ban_duration is None:
-                ban_duration = 'навсегда'
-
-    # Если все еще не определили длительность
-    if ban_duration is None:
-        logger.error(f"Не удалось определить длительность для: '{time_str}'")
-        await m.answer(f"❌ Не удалось распознать время: {time_str}")
-        return
-
-    user_link = await user_link_global(UserId)
-    admin_link = await user_link_global(m.from_user.id)
-
-    success, result = await perform_ban(
-        chat_id=chat_id,
-        user_id=UserId,
-        duration=ban_duration,
-        admin_id=m.from_user.id,
-        reason=reason
-    )
-
-    if success:
-        if ban_duration == 'навсегда' or ban_duration is None:
-            duration_text = "навсегда"
-            duration_display = "навсегда"
-        else:
-            duration_text = result
-            duration_display = f'на {duration_text}'
-
-        gender = await get_user_gender(UserId)
-        gender_admin = await get_user_gender(m.from_user.id)
-
-        response = f"✅ {user_link} забан{g('ен', gender)} {duration_display}\n"
-        response += f"👮‍♂️ Забан{g('ил', gender_admin)}: {admin_link}"
-
-        if msg_text:
-            response += msg_text
-
-        await m.answer(
-            response,
-            parse_mode='HTML',
-            disable_web_page_preview=True
-        )
-    else:
-        await m.answer(f"❌ Ошибка при бане: {result}",
-                       parse_mode='HTML',
-                       disable_web_page_preview=True
-                       )
 
 
 @bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?разбан(\s|$)', re.IGNORECASE)))
@@ -803,279 +536,725 @@ async def ban_info(m: Message):
 # Новые команды для просмотра банов пользователя во всех чатах
 # ======================
 
-@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?мои баны(\s|$)', re.IGNORECASE)))
-async def my_bans(m: Message):
 
+# === 1. /мои баны ===
+@bans.message(F.text.regexp(re.compile(r'^[!./]?мои баны(\s|$)', re.IGNORECASE)))
+@bans.message(Command("my_bans"))
+async def my_bans(m: Message):
     if m.chat.type != 'private':
         return
 
-    # Удаляем префикс из команды
     text = m.text.strip()
-    if text[0] in '!./':
+    if text and text[0] in '!./':
         text = text[1:].strip()
 
-    user_id = m.from_user.id
-    user_link = await user_link_global(user_id)
-    gender = await get_user_gender(user_id)
-
-    # Определяем страницу
     page = 0
     parts = text.split()
-    if len(parts) > 2 and parts[2].isdigit():
-        page = max(0, int(parts[2]) - 1)
+    if len(parts) > 1 and parts[1].isdigit():
+        page = max(0, int(parts[1]) - 1)
 
-    # Получаем все баны пользователя (ТОЛЬКО где был в чате через full_users_chats)
+    user_id = m.from_user.id
     bans_list = await get_user_bans_all_chats(user_id, check_membership=True)
 
     if not bans_list:
+        user_link = await user_link_global(user_id)
         await m.answer(
-            f"✅ {user_link}, у вас нет активных банов ни в одном чате где вы были!",
+            f"✅ {user_link}, у вас нет банов во вселенной Сапфира.",
             parse_mode='HTML',
             disable_web_page_preview=True
         )
         return
 
-    # Пагинация
     total_pages = (len(bans_list) + BANS_PER_PAGE - 1) // BANS_PER_PAGE
-    page = min(page, total_pages - 1) if total_pages > 0 else 0
+    page = min(page, total_pages - 1)
     start_idx = page * BANS_PER_PAGE
-    end_idx = min(start_idx + BANS_PER_PAGE, len(bans_list))
+    end_idx = start_idx + BANS_PER_PAGE
 
-    response = f"📋 <b>Ваши баны во всех чатах</b>\n"
-    response += f"📊 Всего банов: {len(bans_list)}\n"
+    response = f"Ваши баны во вселенной Сапфира ({len(bans_list)})\n\n"
+    for ban in bans_list[start_idx:end_idx]:
+        reason = ban['reason'].strip() or "Причина не указана"
+        response += f"{reason}\n"
 
-    current_time = datetime.now(MOSCOW_TZ)
-
-    for i, ban_info in enumerate(bans_list[start_idx:end_idx], start_idx + 1):
-        chat_id = ban_info['chat_id']
-
-        time_end_dt = ban_info['time_end_dt']
-        duration_text = ban_info['duration']
-        reason = ban_info['reason'][:50] + "..." if len(ban_info['reason']) > 50 else ban_info['reason']
-
-        # Рассчитываем оставшееся время
-        if duration_text.lower() == 'навсегда':
-            status = "⛔ Навсегда"
-            time_text = ""
-        else:
-            try:
-                if time_end_dt:
-                    # Убедимся, что time_end_dt в московском часовом поясе
-                    if time_end_dt.tzinfo is None:
-                        time_end_dt = MOSCOW_TZ.localize(time_end_dt)
-                    elif str(time_end_dt.tzinfo) != str(MOSCOW_TZ):
-                        time_end_dt = time_end_dt.astimezone(MOSCOW_TZ)
-
-                    time_left = time_end_dt - current_time
-
-                    if time_left.total_seconds() <= 0:
-                        status = "🟢 Истек"
-                        time_text = ""
-                    else:
-                        actual_time_left = format_duration(time_left)
-                        status = "🔴 Активен"
-                        time_text = f"{actual_time_left}"
-                else:
-                    status = "⚠️ Неизвестно"
-                    time_text = ""
-            except Exception as e:
-                logger.error(f"Error calculating time left: {e}")
-                status = "⚠️ Ошибка"
-                time_text = ""
-        chat_link = await chat_global_link(chat_id)
-
-        response += (
-            f"{i}. «{chat_link}» {status}\n"
-            f"   📝 Срок: {duration_text} ({time_text})"
-            f"   💬 Причина: {reason}\n"
-            f"   ──────────────────────────\n"
-        )
-
-    # Создаем клавиатуру для пагинации
     keyboard = []
     if total_pages > 1:
         row = []
         if page > 0:
-            row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"mybans_{user_id}_{page - 1}"))
-
+            row.append(InlineKeyboardButton(text='◀️ Назад', callback_data=f"mybans_{user_id}_{page - 1}"))
         if page < total_pages - 1:
-            row.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"mybans_{user_id}_{page + 1}"))
-
+            row.append(InlineKeyboardButton(text='▶️ Вперёд', callback_data=f"mybans_{user_id}_{page + 1}"))
         if row:
             keyboard.append(row)
 
     await m.reply(
-        response,
+        response.strip(),
         parse_mode='HTML',
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
     )
 
 
-@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?баны\s+\S+', re.IGNORECASE)))
-async def user_bans_all_chats(m: Message):
-
+# === 2. /баны @user ===
+@bans.message(F.text.regexp(re.compile(r'^[!./]?баны\s+\S+', re.IGNORECASE)))
+async def user_bans(m: Message):
     if not await check_user_access(m.from_user.id, 1):
         return
 
-    """Показать все баны указанного пользователя во всех чатах (полный список)"""
-    # Удаляем префикс из команды
     text = m.text.strip()
-    if text[0] in '!./':
+    if text and text[0] in '!./':
         text = text[1:].strip()
 
-    MOSCOW_TZ = timezone('Europe/Moscow')
-
     parts = text.split(maxsplit=2)
-
-    # Определяем страницу
-    page = 0
     user_mention = parts[1] if len(parts) > 1 else ""
+    page = 0
 
-    # Проверяем, есть ли номер страницы
     if len(parts) > 2 and parts[2].isdigit():
         page = max(0, int(parts[2]) - 1)
     elif len(parts) == 2:
-        # Только команда и упоминание
         user_mention = parts[1]
 
-    # Разрешаем ID пользователя
     if m.reply_to_message:
-        UserId = m.reply_to_message.from_user.id
+        target_id = m.reply_to_message.from_user.id
     else:
-        UserId = await resolve_id(m, user_mention)
+        target_id = await resolve_id(m, user_mention)
 
-    if not UserId:
+    if not target_id:
         await m.answer("❌ Пользователь не найден.")
         return
 
-
-    user_link = await user_link_global(UserId)
-    requester_link = await user_link_global(m.from_user.id)
-    gender = await get_user_gender(UserId)
-
-    # Получаем ВСЕ баны пользователя (без проверки на участие в чате)
-    bans_list = await get_user_bans_all_chats(UserId, check_membership=False)
-    active_bans_count = await get_user_active_bans_count(UserId, check_membership=False)
+    bans_list = await get_user_bans_all_chats(target_id, check_membership=True)
+    user_link = await user_link_global(target_id)
 
     if not bans_list:
         await m.answer(
-            f"✅ {user_link} не имеет активных банов ни в одном чате!\n"
-            f"👮‍♂️ Запросил: {requester_link}",
+            f"✅ У {user_link} нет банов во вселенной Сапфира.",
             parse_mode='HTML',
             disable_web_page_preview=True
         )
         return
 
-    # Фильтруем: показываем сначала баны где был в чате, потом где не был
-    bans_in_chat = []
-    bans_not_in_chat = []
-
-    for ban in bans_list:
-        if ban.get('was_in_chat', True):
-            bans_in_chat.append(ban)
-        else:
-            bans_not_in_chat.append(ban)
-
-    # Объединяем: сначала те, где был в чате
-    sorted_bans_list = bans_in_chat + bans_not_in_chat
-
-    # Пагинация
-    total_pages = (len(sorted_bans_list) + BANS_PER_PAGE - 1) // BANS_PER_PAGE
-    page = min(page, total_pages - 1) if total_pages > 0 else 0
+    total_pages = (len(bans_list) + BANS_PER_PAGE - 1) // BANS_PER_PAGE
+    page = min(page, total_pages - 1)
     start_idx = page * BANS_PER_PAGE
-    end_idx = min(start_idx + BANS_PER_PAGE, len(sorted_bans_list))
-
-    response = f"📋 <b>Все баны пользователя {user_link}</b>\n"
-    response += f"📊 Всего банов: {len(sorted_bans_list)} ({len(bans_in_chat)} в чатах где был, {len(bans_not_in_chat)} где не был)\n"
+    end_idx = start_idx + BANS_PER_PAGE
 
     current_time = datetime.now(MOSCOW_TZ)
+    response = f"Баны {user_link} во вселенной Сапфира ({len(bans_list)})\n\n"
 
-    for i, ban_info in enumerate(sorted_bans_list[start_idx:end_idx], start_idx + 1):
-        chat_id = ban_info['chat_id']
+    for ban in bans_list[start_idx:end_idx]:
+        reason = ban['reason'].strip() or "Причина не указана"
+        duration = ban['duration']
 
-        time_end_dt = ban_info['time_end_dt']
-        duration_text = ban_info['duration']
-        reason = ban_info['reason'][:50] + "..." if len(ban_info['reason']) > 50 else ban_info['reason']
-        was_in_chat = ban_info.get('was_in_chat', True)
-
-        # Получаем информацию о том, кто забанил
-        admin_id = ban_info['admin_id']
-        if admin_id:
-            try:
-                admin_link = await user_link_global(admin_id)
-            except:
-                admin_link = f"ID: {admin_id}"
+        if duration.lower() == 'навсегда':
+            time_info = "навсегда"
         else:
-            admin_link = "Неизвестен"
+            time_end = ban['time_end_dt']
+            if time_end.tzinfo is None:
+                time_end = MOSCOW_TZ.localize(time_end) if hasattr(MOSCOW_TZ, 'localize') else time_end.replace(tzinfo=MOSCOW_TZ)
+            elif time_end.tzinfo != MOSCOW_TZ:
+                time_end = time_end.astimezone(MOSCOW_TZ)
 
-        # Рассчитываем оставшееся время
-        if duration_text.lower() == 'навсегда':
-            status = "⛔ Навсегда"
-            time_text = ""
-        else:
-            try:
-                if time_end_dt:
-                    # Убедимся, что time_end_dt в московском часовом поясе
-                    if time_end_dt.tzinfo is None:
-                        time_end_dt = MOSCOW_TZ.localize(time_end_dt)
-                    elif str(time_end_dt.tzinfo) != str(MOSCOW_TZ):
-                        time_end_dt = time_end_dt.astimezone(MOSCOW_TZ)
+            time_left = time_end - current_time
+            if time_left.total_seconds() <= 0:
+                time_info = f"{duration}, бан истёк"
+            else:
+                time_info = f"{duration}, осталось {format_duration(time_left)}"
 
-                    time_left = time_end_dt - current_time
+        response += f"{reason} ({time_info})\n"
 
-                    if time_left.total_seconds() <= 0:
-                        status = "🟢 Истек"
-                        time_text = ""
-                    else:
-                        actual_time_left = format_duration(time_left)
-                        status = "🔴 Активен"
-                        time_text = f"⏳ Осталось: {actual_time_left}"
-                else:
-                    status = "⚠️ Неизвестно"
-                    time_text = ""
-            except Exception as e:
-                logger.error(f"Error calculating time left: {e}")
-                status = "⚠️ Ошибка"
-                time_text = ""
-
-        # Иконка статуса участия в чате
-        if was_in_chat:
-            chat_status = "👤"
-            # chat_status_text = "Был в чате"
-        else:
-            chat_status = "❌ ✖️"
-            # chat_status_text = "Не был в чате"
-
-        chat_link = await chat_global_link(chat_id)
-
-        response += (
-            f"{i}. ({chat_status}) «{chat_link}» \n"
-            f"   📝 Срок: {duration_text} ({time_text})\n"
-            f"   👮‍♂️ Забанил: {admin_link}\n"
-            f"   💬 Причина: {reason}\n"
-            f"   ─────────────\n"
-        )
-
-    # Создаем клавиатуру для пагинации
     keyboard = []
     if total_pages > 1:
         row = []
         if page > 0:
-            row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"userbans_{UserId}_{page - 1}"))
-
+            row.append(InlineKeyboardButton(text='◀️ Назад', callback_data=f"userbans_{target_id}_{page - 1}"))
         if page < total_pages - 1:
-            row.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"userbans_{UserId}_{page + 1}"))
-
+            row.append(InlineKeyboardButton(text='▶️ Вперёд', callback_data=f"userbans_{target_id}_{page + 1}"))
         if row:
             keyboard.append(row)
 
     await m.reply(
-        response,
+        response.strip(),
         parse_mode='HTML',
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
     )
+
+
+# === 3. /баны фулл @user ===
+@bans.message(F.text.regexp(re.compile(r'^[!./]?баны\s+фулл\s+\S+', re.IGNORECASE)))
+async def user_bans_full(m: Message):
+    if not await check_user_access(m.from_user.id, 1):
+        return
+
+    text = m.text.strip()
+    if text and text[0] in '!./':
+        text = text[1:].strip()
+
+    parts = text.split(maxsplit=3)
+    if len(parts) < 3:
+        await m.answer("❌ Использование: /баны фулл @username")
+        return
+
+    user_mention = parts[2]
+    page = 0
+    if len(parts) > 3 and parts[3].isdigit():
+        page = max(0, int(parts[3]) - 1)
+
+    if m.reply_to_message:
+        target_id = m.reply_to_message.from_user.id
+    else:
+        target_id = await resolve_id(m, user_mention)
+
+    if not target_id:
+        await m.answer("❌ Пользователь не найден.")
+        return
+
+    bans_list = await get_user_bans_all_chats(target_id, check_membership=False)
+    user_link = await user_link_global(target_id)
+
+    if not bans_list:
+        await m.answer(
+            f"✅ У {user_link} нет записей о банах во вселенной Сапфира.",
+            parse_mode='HTML',
+            disable_web_page_preview=True
+        )
+        return
+
+    # Сортировка: сначала где был, потом где не был
+    in_chat = [b for b in bans_list if b.get('was_in_chat', True)]
+    not_in_chat = [b for b in bans_list if not b.get('was_in_chat', True)]
+    sorted_bans = in_chat + not_in_chat
+
+    total_pages = (len(sorted_bans) + BANS_PER_PAGE - 1) // BANS_PER_PAGE
+    page = min(page, total_pages - 1)
+    start_idx = page * BANS_PER_PAGE
+    end_idx = start_idx + BANS_PER_PAGE
+
+    current_time = datetime.now(MOSCOW_TZ)
+    response = f"Полные баны {user_link} во вселенной Сапфира:\n\n"
+
+    for ban in sorted_bans[start_idx:end_idx]:
+        chat_link = await chat_global_link(ban['chat_id'])
+        was_in_chat = ban.get('was_in_chat', True)
+        chat_status = "был в чате" if was_in_chat else "не был в чате"
+        reason = ban['reason'].strip() or "Причина не указана"
+        duration = ban['duration']
+        admin_link = await user_link_global(ban['admin_id']) if ban['admin_id'] else "Неизвестен"
+
+        if duration.lower() == 'навсегда':
+            time_info = "Срок: навсегда"
+        else:
+            time_end = ban['time_end_dt']
+            if time_end.tzinfo is None:
+                time_end = MOSCOW_TZ.localize(time_end) if hasattr(MOSCOW_TZ, 'localize') else time_end.replace(tzinfo=MOSCOW_TZ)
+            elif time_end.tzinfo != MOSCOW_TZ:
+                time_end = time_end.astimezone(MOSCOW_TZ)
+
+            time_left = time_end - current_time
+            if time_left.total_seconds() <= 0:
+                time_info = f"Срок: {duration} (бан истёк)"
+            else:
+                time_info = f"Срок: {duration} (осталось {format_duration(time_left)})"
+
+        response += (
+            f"• {chat_link} ({chat_status})\n"
+            f"  {time_info}\n"
+            f"  Модератор: {admin_link}\n"
+            f"  Причина: {reason}\n\n"
+        )
+
+    keyboard = []
+    if total_pages > 1:
+        row = []
+        if page > 0:
+            row.append(InlineKeyboardButton(text='◀️ Назад', callback_data=f"fullbans_{target_id}_{page - 1}"))
+        if page < total_pages - 1:
+            row.append(InlineKeyboardButton(text='▶️ Вперёд', callback_data=f"fullbans_{target_id}_{page + 1}"))
+        if row:
+            keyboard.append(row)
+
+    await m.reply(
+        response.strip(),
+        parse_mode='HTML',
+        disable_web_page_preview=True,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+    )
+
+
+# === Пагинация: мои баны ===
+@bans.callback_query(lambda c: c.data.startswith('mybans_'))
+async def my_bans_pag(c: CallbackQuery):
+    if not c.message.reply_to_message or c.from_user.id != c.message.reply_to_message.from_user.id:
+        await c.answer("Это не ваш запрос.", show_alert=True)
+        return
+
+    try:
+        _, uid, p = c.data.split('_', 2)
+        user_id = int(uid)
+        page = int(p)
+
+        if c.from_user.id != user_id:
+            await c.answer("❌ Это не ваши баны!", show_alert=True)
+            return
+
+        bans_list = await get_user_bans_all_chats(user_id, check_membership=True)
+        if not bans_list:
+            await c.message.edit_text("✅ У вас нет банов во вселенной Сапфира.")
+            await c.answer()
+            return
+
+        total_pages = (len(bans_list) + BANS_PER_PAGE - 1) // BANS_PER_PAGE
+        page = min(page, total_pages - 1)
+        start = page * BANS_PER_PAGE
+        end = start + BANS_PER_PAGE
+
+        resp = f"Ваши баны во вселенной Сапфира ({len(bans_list)})\n\n"
+        for ban in bans_list[start:end]:
+            reason = ban['reason'].strip() or "Причина не указана"
+            resp += f"{reason}\n"
+
+        kb = []
+        if total_pages > 1:
+            r = []
+            if page > 0:
+                r.append(InlineKeyboardButton(text='◀️ Назад', callback_data=f"mybans_{user_id}_{page - 1}"))
+            if page < total_pages - 1:
+                r.append(InlineKeyboardButton(text='▶️ Вперёд', callback_data=f"mybans_{user_id}_{page + 1}"))
+            if r:
+                kb.append(r)
+
+        await c.message.edit_text(
+            resp.strip(),
+            parse_mode='HTML',
+            disable_web_page_preview=True,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb) if kb else None
+        )
+        await c.answer()
+    except Exception as e:
+        logger.exception("Ошибка пагинации /мои баны")
+        await c.answer("❌ Ошибка обновления списка.", show_alert=True)
+
+
+# === Пагинация: баны @user ===
+@bans.callback_query(lambda c: c.data.startswith('userbans_'))
+async def user_bans_pag(c: CallbackQuery):
+    if not c.message.reply_to_message or c.from_user.id != c.message.reply_to_message.from_user.id:
+        await c.answer("Это не ваш запрос.", show_alert=True)
+        return
+
+    try:
+        _, uid, p = c.data.split('_', 2)
+        target_id = int(uid)
+        page = int(p)
+
+        bans_list = await get_user_bans_all_chats(target_id, check_membership=True)
+        user_link = await user_link_global(target_id)
+
+        if not bans_list:
+            await c.message.edit_text(f"✅ У {user_link} нет банов во вселенной Сапфира.")
+            await c.answer()
+            return
+
+        total_pages = (len(bans_list) + BANS_PER_PAGE - 1) // BANS_PER_PAGE
+        page = min(page, total_pages - 1)
+        start = page * BANS_PER_PAGE
+        end = start + BANS_PER_PAGE
+
+        current_time = datetime.now(MOSCOW_TZ)
+        resp = f"Баны {user_link} во вселенной Сапфира ({len(bans_list)})\n\n"
+        for ban in bans_list[start:end]:
+            reason = ban['reason'].strip() or "Причина не указана"
+            duration = ban['duration']
+            if duration.lower() == 'навсегда':
+                ti = "навсегда"
+            else:
+                te = ban['time_end_dt']
+                if te.tzinfo is None:
+                    te = MOSCOW_TZ.localize(te) if hasattr(MOSCOW_TZ, 'localize') else te.replace(tzinfo=MOSCOW_TZ)
+                elif te.tzinfo != MOSCOW_TZ:
+                    te = te.astimezone(MOSCOW_TZ)
+                tl = te - current_time
+                if tl.total_seconds() <= 0:
+                    ti = f"{duration}, бан истёк"
+                else:
+                    ti = f"{duration}, осталось {format_duration(tl)}"
+            resp += f"{reason} ({ti})\n"
+
+        kb = []
+        if total_pages > 1:
+            r = []
+            if page > 0:
+                r.append(InlineKeyboardButton(text='◀️ Назад', callback_data=f"userbans_{target_id}_{page - 1}"))
+            if page < total_pages - 1:
+                r.append(InlineKeyboardButton(text='▶️ Вперёд', callback_data=f"userbans_{target_id}_{page + 1}"))
+            if r:
+                kb.append(r)
+
+        await c.message.edit_text(
+            resp.strip(),
+            parse_mode='HTML',
+            disable_web_page_preview=True,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb) if kb else None
+        )
+        await c.answer()
+    except Exception as e:
+        logger.exception("Ошибка пагинации /баны")
+        await c.answer("❌ Ошибка обновления списка.", show_alert=True)
+
+
+# === Пагинация: баны фулл ===
+@bans.callback_query(lambda c: c.data.startswith('fullbans_'))
+async def full_bans_pag(c: CallbackQuery):
+    if not c.message.reply_to_message or c.from_user.id != c.message.reply_to_message.from_user.id:
+        await c.answer("Это не ваш запрос.", show_alert=True)
+        return
+
+    try:
+        _, uid, p = c.data.split('_', 2)
+        target_id = int(uid)
+        page = int(p)
+
+        bans_list = await get_user_bans_all_chats(target_id, check_membership=False)
+        user_link = await user_link_global(target_id)
+
+        if not bans_list:
+            await c.message.edit_text(f"✅ У {user_link} нет записей о банах во вселенной Сапфира.")
+            await c.answer()
+            return
+
+        in_chat = [b for b in bans_list if b.get('was_in_chat', True)]
+        not_in_chat = [b for b in bans_list if not b.get('was_in_chat', True)]
+        sorted_bans = in_chat + not_in_chat
+
+        total_pages = (len(sorted_bans) + BANS_PER_PAGE - 1) // BANS_PER_PAGE
+        page = min(page, total_pages - 1)
+        start = page * BANS_PER_PAGE
+        end = start + BANS_PER_PAGE
+
+        current_time = datetime.now(MOSCOW_TZ)
+        resp = f"Полные баны {user_link} во вселенной Сапфира:\n\n"
+        for ban in sorted_bans[start:end]:
+            chat_link = await chat_global_link(ban['chat_id'])
+            was_in_chat = ban.get('was_in_chat', True)
+            chat_status = "был в чате" if was_in_chat else "не был в чате"
+            reason = ban['reason'].strip() or "Причина не указана"
+            duration = ban['duration']
+            admin_link = await user_link_global(ban['admin_id']) if ban['admin_id'] else "Неизвестен"
+
+            if duration.lower() == 'навсегда':
+                ti = "Срок: навсегда"
+            else:
+                te = ban['time_end_dt']
+                if te.tzinfo is None:
+                    te = MOSCOW_TZ.localize(te) if hasattr(MOSCOW_TZ, 'localize') else te.replace(tzinfo=MOSCOW_TZ)
+                elif te.tzinfo != MOSCOW_TZ:
+                    te = te.astimezone(MOSCOW_TZ)
+                tl = te - current_time
+                if tl.total_seconds() <= 0:
+                    ti = f"Срок: {duration} (бан истёк)"
+                else:
+                    ti = f"Срок: {duration} (осталось {format_duration(tl)})"
+
+            resp += (
+                f"• {chat_link} ({chat_status})\n"
+                f"  {ti}\n"
+                f"  Модератор: {admin_link}\n"
+                f"  Причина: {reason}\n\n"
+            )
+
+        kb = []
+        if total_pages > 1:
+            r = []
+            if page > 0:
+                r.append(InlineKeyboardButton(text='◀️ Назад', callback_data=f"fullbans_{target_id}_{page - 1}"))
+            if page < total_pages - 1:
+                r.append(InlineKeyboardButton(text='▶️ Вперёд', callback_data=f"fullbans_{target_id}_{page + 1}"))
+            if r:
+                kb.append(r)
+
+        await c.message.edit_text(
+            resp.strip(),
+            parse_mode='HTML',
+            disable_web_page_preview=True,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb) if kb else None
+        )
+        await c.answer()
+    except Exception as e:
+        logger.exception("Ошибка пагинации /баны фулл")
+        await c.answer("❌ Ошибка обновления списка.", show_alert=True)
+
+
+
+
+
+@bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?(?:чс|бан)(\s|$)', re.IGNORECASE)))
+async def ban_users(m: Message):
+    chat_id = m.chat.id
+
+    if not await auto_check_AccessLevel_for_rang(m.from_user.id, chat_id, 21):
+        return
+
+    # Удаляем префикс из команды
+    text = m.text.strip()
+    if text and text[0] in '!./':
+        text = text[1:].lstrip()
+        # Если после префикса сразу двоеточие, удаляем его тоже
+        if text.startswith(':'):
+            text = text[1:].lstrip()
+
+    # Разделяем команду и причину по новой строке
+    command_part, _, reason_part = text.partition('\n')
+
+    # Убираем начальные/конечные пробелы
+    command_part = command_part.strip()
+    reason = reason_part.strip() if reason_part.strip() else "Не указана"
+
+    # Разбиваем команду на части
+    parts = command_part.split()
+    # logger.info(f"Части команды: {parts}")
+
+    UserId = None
+    time_str = None
+
+    # Если это ответ на сообщение
+    if m.reply_to_message:
+        UserId = m.reply_to_message.from_user.id
+        # Ищем время в частях после команды (если есть)
+        time_parts = []
+        if len(parts) > 1:
+            time_parts = parts[1:]
+        time_str = ' '.join(time_parts) if time_parts else None
+    else:
+        # Если не ответ на сообщение - анализируем команду
+        if len(parts) < 2:
+            await m.reply('⚠️ Пользователь не указан!\n\n'
+                          'Используйте один из способов:\n'
+                          '1. Ответьте на сообщение пользователя\n'
+                          '2. Укажите @username или ID пользователя\n'
+                          'Пример: <code>/бан @username 1ч</code>\n'
+                          '<code>причина с новой строки</code>',
+                          parse_mode='HTML')
+            return
+
+        # Пробуем найти пользователя в разных позициях
+        # Сначала смотрим первый элемент после команда
+        potential_user = parts[1]
+        resolved_id = await resolve_id(m, potential_user)
+        if resolved_id:
+            UserId = resolved_id
+            # Время может быть дальше
+            if len(parts) > 2:
+                time_str = ' '.join(parts[2:])
+        else:
+            # Первый элемент не пользователь - может быть сначала время, потом пользователь
+            # Например: "бан 4 часа @user"
+            # Пробуем найти пользователя дальше
+            for i in range(2, len(parts)):
+                potential_user = parts[i]
+                resolved_id = await resolve_id(m, potential_user)
+                if resolved_id:
+                    UserId = resolved_id
+                    # Время - это часть перед пользователем
+                    time_str = ' '.join(parts[1:i])
+                    break
+
+        # Если не нашли пользователя
+        if not UserId:
+            # Пробуем последний элемент как пользователя
+            potential_user = parts[-1]
+            resolved_id = await resolve_id(m, potential_user)
+            if resolved_id:
+                UserId = resolved_id
+                # Время - это всё перед последним элементом
+                time_str = ' '.join(parts[1:-1])
+
+        # Если все еще не нашли пользователя
+        if not UserId:
+            await m.reply('⚠️ Пользователь не указан или не найден!\n\n'
+                          'Используйте один из способов:\n'
+                          '1. Ответьте на сообщение пользователя\n'
+                          '2. Укажите @username или ID пользователя\n'
+                          'Пример: <code>/бан @username 1ч</code>\n'
+                          '<code>причина с новой строки</code>',
+                          parse_mode='HTML')
+            return
+
+    # Логируем найденные данные
+    # logger.info(f"UserID: {UserId}, Time string: '{time_str}', Reason: '{reason}'")
+
+    # Если причина указана с новой строки, обрезаем ее до 200 символов
+    if reason != "Не указана":
+        reason = reason[:200]
+        msg_text = f'\n💬 Причина: {reason}'
+    else:
+        msg_text = ""
+
+    # ========== ПРОВЕРКА РАНГОВ ==========
+    try:
+        ManagementAdminId = m.from_user.id
+        UserRang = await check_admin_for_rang(UserId, chat_id)
+        ManagementRang = await check_admin_for_rang(ManagementAdminId, chat_id)
+
+        # Если целевой пользователь является администратором
+        if UserRang > 0:
+            # Босс-агенты имеют полную власть
+            if ManagementAdminId not in boss_agent:
+                # Проверяем, является ли управляющий Telegram-владельцем
+                is_tg_owner = await is_telegram_owner(bot, chat_id, ManagementAdminId)
+
+                if not is_tg_owner:
+                    if UserRang >= ManagementRang:
+                        user_link = await user_link_global(UserId)
+                        admin_link = await user_link_global(ManagementAdminId)
+
+                        # Шутливые ответы в зависимости от ситуации
+                        if UserRang == ManagementRang:
+                            await m.answer(
+                                f"😂 {admin_link}, вы пытаетесь заблокировать администратора такого же ранга, как вы!\n",
+                                parse_mode='HTML',
+                                disable_web_page_preview=True
+                            )
+                        else:
+                            await m.answer(
+                                f"😏 {admin_link}, вы пытаетесь заблокировать администратора высшего ранга!\n",
+                                parse_mode='HTML',
+                                disable_web_page_preview=True
+                            )
+                        return
+    except Exception as e:
+        logger.error(e, exc_info=True)
+        # В случае ошибки продолжаем выполнение
+    # ========== КОНЕЦ ПРОВЕРКИ РАНГОВ ==========
+
+    # Остальная логика проверок (админы, владелец и т.д.)
+    admins = await bot.get_chat_administrators(chat_id)
+
+    if not UserId:
+        await m.reply('⚠️ Пользователь не указан или указан не верно.\nПравильный вид команды: бан @')
+        return
+
+    if UserId in [admin.user.id for admin in admins if admin.status == 'creator']:
+        await m.reply('❎ Владельца чата нельзя заблокировать.')
+        return
+
+    if UserId in [admin.user.id for admin in admins]:
+        await m.reply('❎ Этот администратор не может быть заблокирован.')
+        return
+
+    if UserId == m.from_user.id:
+        await m.reply('❎ Вы пытались заблокировать себя.')
+        await m.answer_sticker(
+            sticker='CAACAgIAAxkBAAEPgyNo4WXlQeKd729gw8WbZ_AFUJjSsQACCwEAAladvQpOseemCPvtSTYE')
+        return
+
+    if UserId == chat_id:
+        await m.reply('❎ Нельзя заблокировать чат.')
+        return
+
+    chat_info = await bot.get_chat(chat_id)
+    linked_chat_id = chat_info.linked_chat_id
+
+    if (
+            m.reply_to_message and m.reply_to_message.sender_chat
+            and m.reply_to_message.sender_chat.id == linked_chat_id
+    ):
+        await m.reply('❎ Нельзя забанить привязанный канал!')
+        return
+
+    # Определяем длительность бана
+    ban_duration = None
+    if time_str:
+        logger.info(f"Парсим время: '{time_str}'")
+
+        # Проверяем специальные случаи "навсегда"
+        if isinstance(time_str, str) and time_str.lower() in ["навсегда", "permanent", "forever", "навечно", "вечно"]:
+            ban_duration = 'навсегда'
+            logger.info("Установлен вечный бан")
+        else:
+            # Пробуем распарсить время
+            ban_duration = parse_time_string(time_str)
+
+            if ban_duration is None:
+                # Пробуем улучшенный парсинг (как в мутах)
+                logger.info("Стандартный парсинг не удался, пробуем улучшенный")
+                ban_duration = await parse_time_improved_ban(time_str)
+
+    # Если время не указано или не распознано, используем настройки по умолчанию
+    if ban_duration is None:
+        default_duration_str = await get_default_ban_duration(m.chat.id)
+        #logger.info(f"Используем настройку по умолчанию: {default_duration_str}")
+
+        if default_duration_str is None:
+            ban_duration = 'навсегда'
+        elif default_duration_str == "permanent":
+            ban_duration = 'навсегда'
+        else:
+            # ФИКС: Проверяем тип данных
+            if isinstance(default_duration_str, timedelta):
+                # Преобразуем timedelta в строку
+                total_seconds = default_duration_str.total_seconds()
+                hours = int(total_seconds // 3600)
+                minutes = int((total_seconds % 3600) // 60)
+
+                if hours > 0:
+                    if minutes > 0:
+                        default_duration_str = f"{hours}ч {minutes}м"
+                    else:
+                        default_duration_str = f"{hours}ч"
+                elif minutes > 0:
+                    default_duration_str = f"{minutes}м"
+                else:
+                    default_duration_str = f"{int(total_seconds)}с"
+
+            ban_duration = parse_time_string(default_duration_str)
+            if ban_duration is None:
+                ban_duration = 'навсегда'
+
+    # Если все еще не определили длительность
+    if ban_duration is None:
+        logger.error(f"Не удалось определить длительность для: '{time_str}'")
+        await m.answer(f"❌ Не удалось распознать время: {time_str}")
+        return
+
+    user_link = await user_link_global(UserId)
+    admin_link = await user_link_global(m.from_user.id)
+
+    success, result = await perform_ban(
+        chat_id=chat_id,
+        user_id=UserId,
+        duration=ban_duration,
+        admin_id=m.from_user.id,
+        reason=reason
+    )
+
+    if success:
+        if ban_duration == 'навсегда' or ban_duration is None:
+            duration_text = "навсегда"
+            duration_display = "навсегда"
+        else:
+            duration_text = result
+            duration_display = f'на {duration_text}'
+
+        gender = await get_user_gender(UserId)
+        gender_admin = await get_user_gender(m.from_user.id)
+
+        response = f"✅ {user_link} забан{g('ен', gender)} {duration_display}\n"
+        response += f"👮‍♂️ Забан{g('ил', gender_admin)}: {admin_link}"
+
+        if msg_text:
+            response += msg_text
+
+        await m.answer(
+            response,
+            parse_mode='HTML',
+            disable_web_page_preview=True
+        )
+    else:
+        await m.answer(f"❌ Ошибка при бане: {result}",
+                       parse_mode='HTML',
+                       disable_web_page_preview=True
+                       )
+
+
 
 
 # ======================

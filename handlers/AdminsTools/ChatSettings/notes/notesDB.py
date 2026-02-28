@@ -4,6 +4,7 @@ from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL
 
 logger = logging.getLogger(__name__)
 
+
 async def add_note(chat_id: int, notes_name: str, notes_text: str) -> dict:
     """Добавление новой заметки"""
     try:
@@ -35,6 +36,53 @@ async def add_note(chat_id: int, notes_name: str, notes_text: str) -> dict:
     except Exception as e:
         logger.error(e, exc_info=True)
         return {'success': False, 'error': str(e)}
+
+
+async def update_note_text(chat_id: int, identifier: str, new_text: str) -> bool:
+    """Обновление текста существующей заметки по ID или названию"""
+    try:
+        pool = get_db_pool()
+        async with pool.acquire() as conn:
+            # Обновляем по ID (если identifier число)
+            if identifier.isdigit():
+                result = await conn.execute(
+                    'UPDATE notes SET notes_text = $1 WHERE chat_id = $2 AND notes_id = $3',
+                    new_text, chat_id, int(identifier)
+                )
+                return result.split()[-1] != '0'
+            else:
+                # Обновляем по названию
+                result = await conn.execute(
+                    'UPDATE notes SET notes_text = $1 WHERE chat_id = $2 AND notes_name = $3',
+                    new_text, chat_id, identifier
+                )
+                return result.split()[-1] != '0'
+    except Exception as e:
+        logger.error(e, exc_info=True)
+        return False
+
+async def rename_note(chat_id: int, identifier: str, new_name: str) -> bool:
+    """Переименование заметки по ID или названию"""
+    try:
+        pool = get_db_pool()
+        async with pool.acquire() as conn:
+            # Обновляем по ID
+            if identifier.isdigit():
+                result = await conn.execute(
+                    'UPDATE notes SET notes_name = $1 WHERE chat_id = $2 AND notes_id = $3',
+                    new_name, chat_id, int(identifier)
+                )
+                return result.split()[-1] != '0'
+            else:
+                # Обновляем по названию
+                result = await conn.execute(
+                    'UPDATE notes SET notes_name = $1 WHERE chat_id = $2 AND notes_name = $3',
+                    new_name, chat_id, identifier
+                )
+                return result.split()[-1] != '0'
+    except Exception as e:
+        logger.error(e, exc_info=True)
+        return False
 
 
 async def delete_note(chat_id: int, identifier: str) -> bool:
@@ -159,3 +207,6 @@ async def get_note_by_name(chat_id: int, notes_name: str) -> dict:
     except Exception as e:
         logger.error(e, exc_info=True)
         return None
+
+
+

@@ -25,7 +25,7 @@ from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang imp
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.checks.user_online_status import get_user_status
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 chatadmin = Router()
@@ -48,50 +48,113 @@ async def is_telegram_owner(bot, chat_id, user_id):
         return False
 
 
-@chatadmin.message(lambda m: m.text and m.text.lower().startswith("повысить"))
-@chatadmin.message(lambda m: m.text and m.text.lower().startswith("!повысить"))
-@chatadmin.message(lambda m: m.text and m.text.lower().startswith(".повысить"))
-@chatadmin.message(lambda m: m.text and m.text.lower().startswith("/повысить"))
-@chatadmin.message(lambda m: m.text and m.text.lower().startswith("сап повысить"))
+@chatadmin.message(lambda m: m.text and any(
+    m.text.lower().startswith(prefix)
+    for prefix in ["повысить", "!повысить", ".повысить", "/повысить", "сап повысить"]
+))
 async def increase_chat_admin(m: Message):
     if m.chat.type == 'private':
         return
+
     ChatId = m.chat.id
     User_Id = m.from_user.id
 
-    # Проверяем права доступа: босс-агенты пропускаются, остальные проходят проверку
     if User_Id not in boss_agent and not await auto_check_AccessLevel_for_rang(User_Id, ChatId, 41):
         return
+
     try:
-        # Определяем UserId
+        # Получаем текст команды
+        text = m.text
+
+        # Удаляем префиксы команды
+        for prefix in ["сап повысить ", "повысить ", "!повысить ", ".повысить ", "/повысить "]:
+            if text.lower().startswith(prefix.lower()):
+                text = text[len(prefix):].strip()
+                break
+
+        # Определяем параметры
+        UserId = None
+        rang_str = None
+
         if m.reply_to_message:
-            # Если ответ на сообщение
+            # Формат: "повысить" (ответ на сообщение)
             UserId = m.reply_to_message.from_user.id
-            rang_str = None
+
+            # Проверяем, указан ли ранг в тексте
+            if text and text.strip().isdigit():
+                rang_str = text.strip()
+            elif text:
+                # Если есть текст после команды, пытаемся найти в нем ранг
+                parts = text.split()
+                if parts and parts[0].isdigit():
+                    rang_str = parts[0]
         else:
-            # Если команда с упоминанием
-            parts = m.text.split()
-            if len(parts) < 2:
-                await m.answer(
-                    "❌ <b>Неверный формат команды!</b>\nИспользуйте: Повысить {@username} или ответьте на сообщение",
-                    parse_mode='HTML')
+            # Если нет reply, парсим аргументы
+            if not text:
                 return
 
-            # Проверяем, если последнее слово это число (ранг)
-            if len(parts) >= 3 and parts[1].isdigit():
-                # Формат: Повысить 3 @username
-                rang_str = parts[1].strip()
-                mention = parts[2]
+            # Парсим аргументы: ищем число (ранг) и username
+            parts = text.split()
+            temp_rang = None
+            temp_username_parts = []
+
+            # Проходим по всем частям
+            for i, part in enumerate(parts):
+                if part.isdigit() and 1 <= int(part) <= 5:
+                    # Нашли ранг (число от 1 до 5)
+                    temp_rang = part
+                else:
+                    # Это не ранг, добавляем к username
+                    temp_username_parts.append(part)
+
+            # Если нашли ранг
+            if temp_rang:
+                rang_str = temp_rang
+
+            # Формируем username из оставшихся частей
+            if temp_username_parts:
+                username = ' '.join(temp_username_parts).strip()
+                if username:
+                    # Очищаем username от возможных лишних символов
+                    # Убираем @ в начале, если он есть
+                    if username.startswith('@'):
+                        username = username[1:]
+
+                    # Пробуем найти пользователя
+                    UserId = await resolve_id(m, f"@{username}")
+
+                    # Если не нашли через @, пробуем как есть
+                    if not UserId:
+                        UserId = await resolve_id(m, username)
+
+                    # Если все еще не нашли, пробуем извлечь username из ссылки
+                    if not UserId:
+                        # Проверяем, есть ли t.me/ в строке
+                        import re
+                        if 't.me/' in username or 'telegram.me/' in username:
+                            # Извлекаем username из ссылки
+                            match = re.search(r'(?:t\.me/|telegram\.me/)([a-zA-Z0-9_]+)', username)
+                            if match:
+                                extracted_username = match.group(1)
+                                UserId = await resolve_id(m, f"@{extracted_username}")
             else:
-                # Формат: Повысить @username (без ранга)
-                rang_str = None
-                mention = parts[-1]  # Берём последнее слово как упоминание
+                # Нет username в аргументах
+                if not temp_rang:
+                    # Просто "повысить @username" без ранга
+                    UserId = await resolve_id(m, text)
+                else:
+                    # "повысить {ранг}" без username
+                    await m.answer(
+                        "❌ <b>Укажите пользователя!</b>\n"
+                        "Используйте: Повысить {ранг} @username\n"
+                        "Или ответьте на сообщение пользователя",
+                        parse_mode='HTML'
+                    )
+                    return
 
-            UserId = await resolve_id(m, mention)
-
-            if not UserId:
-                await m.reply("⚠️ Не удалось определить пользователя. Укажите @username или ID.")
-                return
+        if not UserId:
+            await m.reply("⚠️ Не удалось определить пользователя. Укажите @username или ID.")
+            return
 
         # Если ранг не указан, повышаем на 1 от текущего
         UserRang = await check_admin_for_rang(UserId, ChatId)
@@ -119,7 +182,7 @@ async def increase_chat_admin(m: Message):
 
         # Проверяем, является ли целевой пользователь владельцем (ранг 5)
         if UserRang == 5 and not is_tg_owner:
-            await m.answer('❌ <b>Нельзя изменять ранг владельца!</b>', parse_mode='HTML')
+            await m.answer('❌ Нельзя изменять ранг владельца.', parse_mode='HTML')
             return
 
         # Босс-агенты имеют полную власть
@@ -127,7 +190,7 @@ async def increase_chat_admin(m: Message):
             # Telegram-владелец может управлять любыми администраторами и повышать до 5 ранга
             if not is_tg_owner:
                 if UserRang > ManagementRang:
-                    await m.answer('❌ <b>Вы не можете управлять администраторами высшего ранга!</b>',
+                    await m.answer('❌ Вы не можете управлять администраторами высшего ранга.',
                                    parse_mode='HTML')
                     return
 
@@ -135,23 +198,23 @@ async def increase_chat_admin(m: Message):
                 max_allowed_rang = ManagementRang
                 if rang > max_allowed_rang:
                     await m.answer(
-                        f'❌ <b>Вы не можете повысить до ранга {rang}, так как ваш ранг {ManagementRang}!</b>',
+                        f'❌ Вы не можете повысить до ранга {rang}, так как ваш ранг {ManagementRang}.',
                         parse_mode='HTML')
                     return
 
         # Проверяем, не пытаемся ли повысить выше 5 ранга
         if rang > 5:
-            await m.answer('❌ <b>Максимальный ранг - 5!</b>', parse_mode='HTML')
+            await m.answer('❌ Максимальный ранг - 5.', parse_mode='HTML')
             return
 
         # Проверяем, не пытаемся ли понизить (если новый ранг ниже текущего)
         if rang < UserRang:
-            await m.answer('❌ <b>Новый ранг должен быть выше текущего!</b>', parse_mode='HTML')
+            await m.answer('❌ Новый ранг должен быть выше текущего.', parse_mode='HTML')
             return
 
         # Проверяем, не пытаемся ли оставить на том же ранге
         if rang == UserRang:
-            await m.answer('❌ <b>Пользователь уже на этом ранге!</b>', parse_mode='HTML')
+            await m.answer('❌ Пользователь уже на этом ранге.', parse_mode='HTML')
             return
 
         gender = await get_user_gender(UserId)
@@ -180,6 +243,7 @@ async def increase_chat_admin(m: Message):
 
     except Exception as e:
         logger.error(e, exc_info=True)
+
 
 
 @chatadmin.message(lambda m: m.text and m.text.lower().startswith("понизить"))
@@ -298,18 +362,14 @@ async def decrease_chat_admin(m: Message):
 @chatadmin.message(lambda m: m.text and m.text.lower().startswith("/снять"))
 @chatadmin.message(lambda m: m.text and m.text.lower().startswith("сап снять"))
 async def remove_chat_admin(m: Message):
-    global rank_names
     if m.chat.type == 'private':
         return
     ChatId = m.chat.id
     User_Id = m.from_user.id
 
-    if not await auto_check_AccessLevel_for_rang(User_Id, ChatId, 41):
-        return
-
 
     # Проверяем права доступа: босс-агенты пропускаются, остальные проходят проверку
-    if User_Id not in boss_agent and not await auto_check_AccessLevel_for_rang(User_Id, ChatId, 17):
+    if User_Id not in boss_agent and not await auto_check_AccessLevel_for_rang(User_Id, ChatId, 41):
         return
     try:
         if m.reply_to_message:
@@ -447,12 +507,7 @@ async def log_chat_admin(m: Message):
     ChatId = m.chat.id
     User_Id = m.from_user.id
 
-    if not await auto_check_AccessLevel_for_rang(User_Id, ChatId, 42):
-        return
-
-
-    # Проверяем права доступа: босс-агенты пропускаются, остальные проходят проверку
-    if User_Id not in boss_agent and not await auto_check_AccessLevel_for_rang(User_Id, ChatId, 18):
+    if User_Id not in boss_agent and not await auto_check_AccessLevel_for_rang(User_Id, ChatId, 42):
         return
 
     try:
@@ -547,7 +602,7 @@ async def list_admins(m: Message):
         admins = await get_all_chat_admins(ChatId)
 
         if not admins:
-            await m.answer("❌ <b>В этом чате нет администраторов.</b>", parse_mode='HTML')
+            await m.answer("❌ В этом чате нет администраторов.", parse_mode='HTML')
             return
 
         admins_by_rank = {5: [], 4: [], 3: [], 2: [], 1: []}
@@ -697,7 +752,7 @@ async def restore_owner(m: Message):
         current_rang = await check_admin_for_rang(UserId, ChatId)
 
         if current_rang == 5:
-            await m.answer("✅ <b>Вы уже являетесь владельцем чата.</b>", parse_mode='HTML')
+            await m.answer("✅ Вы уже являетесь владельцем чата.", parse_mode='HTML')
             return
 
         # Восстанавливаем владельца в должности (ранг 5)

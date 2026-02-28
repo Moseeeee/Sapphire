@@ -30,7 +30,7 @@ from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import get_random_text, rate_limit_with_cleanup
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 from handlers.BotAutomaticWork.universal_bot import bot
 from pytz import timezone as pytz_timezone
@@ -516,8 +516,7 @@ async def user_warns(m: Message):
     all_warns = await get_user_warns(m.chat.id, UserId)
 
     if not all_warns:
-        await m.answer(f"📋 <b>Варны пользователя {user_link}</b>\n"
-                       f"📊 Всего варнов: {warn_count}/{warn_limit}\n\n"
+        await m.answer(f"📋 <b>Варны пользователя {user_link}</b> ({warn_count}/{warn_limit})\n\n"
                        f"✅ Нет активных варнов",
                        parse_mode='HTML', disable_web_page_preview=True)
         return
@@ -532,9 +531,7 @@ async def user_warns(m: Message):
     end_idx = min(start_idx + WARNS_PER_PAGE_USER, len(all_warns))
     current_warns = all_warns[start_idx:end_idx]
 
-    response = f"📋 <b>Варны пользователя {user_link}</b>\n"
-    response += f"📊 Всего варнов: {warn_count}/{warn_limit}\n"
-    response += f"📄 Страница {page + 1}/{total_pages}\n\n"
+    response = f"📋 <b>Варны пользователя {user_link}</b> ({warn_count}/{warn_limit})\n\n"
 
     # Отображаем варны для текущей страницы
     for i, (warn_id, admin_id, reason, created_at, expires_at, real_id) in enumerate(current_warns,
@@ -955,8 +952,7 @@ async def user_warns_pagination(c: CallbackQuery):
 
         if not all_warns:
             await c.message.edit_text(
-                f"📋 <b>Варны пользователя {user_link}</b>\n"
-                f"📊 Всего варнов: {warn_count}/{warn_limit}\n\n"
+                f"📋 <b>Варны пользователя {user_link}</b> ({warn_count}/{warn_limit})\n\n"
                 f"✅ Нет активных варнов",
                 parse_mode='HTML'
             )
@@ -973,9 +969,7 @@ async def user_warns_pagination(c: CallbackQuery):
         end_idx = min(start_idx + WARNS_PER_PAGE_USER, len(all_warns))
         current_warns = all_warns[start_idx:end_idx]
 
-        response = f"📋 <b>Варны пользователя {user_link}</b>\n"
-        response += f"📊 Всего варнов: {warn_count}/{warn_limit}\n"
-        response += f"📄 Страница {page + 1}/{total_pages}\n\n"
+        response = f"📋 <b>Варны пользователя {user_link}</b> ({warn_count}/{warn_limit})\n\n"
 
         # Отображаем варны для текущей страницы
         for i, (warn_id, admin_id, reason, created_at, expires_at, real_id) in enumerate(current_warns,

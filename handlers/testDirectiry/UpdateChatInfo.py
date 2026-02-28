@@ -6,9 +6,6 @@ from handlers.BotAutomaticWork.universal_bot import bot
 UpdatesChatInfo = Router()
 
 
-
-
-
 async def add_chat_info(chat_id, chat_title, chat_username):
     try:
         async with aiosqlite.connect('sup.db') as db:

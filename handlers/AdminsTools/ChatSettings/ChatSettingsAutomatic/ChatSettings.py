@@ -1,21 +1,25 @@
-
 import logging
 import re
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
+from typing import Tuple, Optional, Dict, List, Union
+from collections import defaultdict
+import asyncio
 
 import pytz
 from aiogram import Router, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, PhotoSize
+from aiogram.filters import Command
 from handlers.BotAutomaticWork.BotCreatedGlobal import get_bot_by_token
 from handlers.BotAutomaticWork.Gonfig.multi_bot_config import MultiBotConfig
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_agent_access, \
     auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.AdminsTools.ChatSettings.ChatSettingsAutomatic.ChatSettingsDB import (
     add_scheduled_change, get_all_active_changes, get_combined_changes_by_date,
     get_change_by_id, delete_change, get_changes_by_type, create_scheduled_changes_table,
-    deactivate_change, get_changes_by_status, get_statistics, delete_all_changes
+    get_statistics, delete_all_changes, MOSCOW_TZ
 )
 from handlers.AdminsTools.ChatSettings.ChatSettingsAutomatic.chat_settings_service import (
     get_auto_chat_service, init_auto_chat_service, shutdown_auto_chat_service,
@@ -66,6 +70,32 @@ REPEAT_TYPE_DISPLAY = {
     'yearly': 'ежегодно'
 }
 
+# Относительные даты на русском
+RELATIVE_DATE_MAPPING = {
+    'сегодня': 0,
+    'завтра': 1,
+    'послезавтра': 2,
+    'через день': 2,
+    'через 2 дня': 2,
+    'через 3 дня': 3,
+    'через неделю': 7,
+    'через месяц': 30,
+    'через год': 365,
+    'на следующей неделе': 7,
+    'в следующем месяце': 30,
+    'в следующем году': 365,
+    'today': 0,
+    'tomorrow': 1,
+    'next week': 7,
+    'next month': 30,
+    'next year': 365
+}
+
+# Кэш для отслеживания последних изменений аватарок
+_last_avatar_change: Dict[int, datetime] = {}
+# Блокировка для защиты от конкурентного доступа
+_avatar_lock: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
 
 def parse_repeat_type(user_input: str) -> str:
     """Парсит тип повторения с поддержкой русского и английского."""
@@ -73,7 +103,7 @@ def parse_repeat_type(user_input: str) -> str:
     return REPEAT_TYPE_MAPPING.get(user_input, 'once')
 
 
-def validate_repeat_type(repeat_type: str) -> tuple[bool, str]:
+def validate_repeat_type(repeat_type: str) -> tuple[bool, Union[str, None]]:
     """Проверяет и нормализует тип повторения."""
     normalized = parse_repeat_type(repeat_type)
     valid_types = ['once', 'daily', 'weekly', 'monthly', 'yearly']
@@ -90,14 +120,254 @@ def validate_text_length(text: str, max_length: int, field_name: str) -> tuple[b
     return True, ""
 
 
+async def check_avatar_rate_limit(chat_id: int) -> Tuple[bool, Optional[str]]:
+    """
+    Проверяет, не превышен ли лимит на изменение аватарки (минимум 5 минут).
+    Возвращает (можно_менять, сообщение_об_ошибке)
+    """
+    lock = _avatar_lock.get(chat_id)
+    if not lock:
+        lock = asyncio.Lock()
+        _avatar_lock[chat_id] = lock
+
+    async with lock:
+        now = datetime.now(MOSCOW_TZ)
+        last_change = _last_avatar_change.get(chat_id)
+
+        if last_change:
+            time_diff = (now - last_change).total_seconds() / 60  # разница в минутах
+            if time_diff < 5:
+                next_allowed = last_change + timedelta(minutes=5)
+                minutes_left = int(5 - time_diff)
+                seconds_left = int((5 - time_diff) * 60) % 60
+                return False, (f"❌ Слишком часто! Аватарку можно менять не чаще раза в 5 минут.\n"
+                               f"⏳ Следующее изменение доступно через {minutes_left} мин {seconds_left} сек")
+
+        return True, None
+
+
+async def update_avatar_change_time(chat_id: int):
+    """Обновляет время последнего изменения аватарки."""
+    lock = _avatar_lock.get(chat_id)
+    if not lock:
+        lock = asyncio.Lock()
+        _avatar_lock[chat_id] = lock
+
+    async with lock:
+        _last_avatar_change[chat_id] = datetime.now(MOSCOW_TZ)
+
+
+class DateTimeParser:
+    """Универсальный парсер даты и времени."""
+
+    def __init__(self):
+        self.now = datetime.now(MOSCOW_TZ)
+
+    def parse_relative_date(self, text: str) -> Optional[int]:
+        """Парсит относительную дату (завтра, через месяц и т.д.)."""
+        text = text.lower().strip()
+
+        # Прямое сопоставление
+        if text in RELATIVE_DATE_MAPPING:
+            return RELATIVE_DATE_MAPPING[text]
+
+        # Парсинг "через X дней/недель/месяцев/лет"
+        pattern = r'через\s+(\d+)\s*(день|дня|дней|недел[юьи]|месяц[а]?|год[а]?|лет)'
+        match = re.search(pattern, text)
+
+        if match:
+            number = int(match.group(1))
+            unit = match.group(2)
+
+            if 'день' in unit or 'дня' in unit or 'дней' in unit:
+                return number
+            elif 'недел' in unit:
+                return number * 7
+            elif 'месяц' in unit:
+                return number * 30
+            elif 'год' in unit or 'лет' in unit:
+                return number * 365
+
+        return None
+
+    def parse_date_part(self, date_str: str) -> Tuple[Optional[datetime], Optional[str]]:
+        """Парсит часть с датой, поддерживая различные форматы."""
+        date_str = date_str.strip().lower()
+
+        # Проверяем на относительную дату
+        days_offset = self.parse_relative_date(date_str)
+        if days_offset is not None:
+            target_date = self.now + timedelta(days=days_offset)
+            # Возвращаем дату БЕЗ timezone, только дата
+            return target_date.replace(hour=0, minute=0, second=0, microsecond=0).replace(tzinfo=None), None
+
+        # Формат: ДД.ММ.ГГГГ
+        pattern_full = r'^(\d{1,2})\.(\d{1,2})\.(\d{4})$'
+        match = re.match(pattern_full, date_str)
+        if match:
+            day, month, year = map(int, match.groups())
+            try:
+                # Возвращаем naive datetime (без timezone)
+                return datetime(year, month, day), None
+            except ValueError:
+                return None, f"❌ Неверная дата: {date_str}"
+
+        # Формат: ДД.ММ
+        pattern_short = r'^(\d{1,2})\.(\d{1,2})$'
+        match = re.match(pattern_short, date_str)
+        if match:
+            day, month = map(int, match.groups())
+            year = self.now.year
+            try:
+                target_date = datetime(year, month, day)
+
+                # Если дата уже прошла в этом году, берем следующий год
+                if target_date < self.now.replace(hour=0, minute=0, second=0, microsecond=0):
+                    target_date = datetime(year + 1, month, day)
+
+                return target_date, None
+            except ValueError:
+                return None, f"❌ Неверная дата: {date_str}"
+
+        # Формат: ДД (только число)
+        if date_str.isdigit() and 1 <= int(date_str) <= 31:
+            day = int(date_str)
+            month = self.now.month
+            year = self.now.year
+
+            try:
+                target_date = datetime(year, month, day)
+
+                # Если число уже прошло в этом месяце, берем следующий месяц
+                if target_date < self.now.replace(hour=0, minute=0, second=0, microsecond=0):
+                    if month == 12:
+                        target_date = datetime(year + 1, 1, day)
+                    else:
+                        target_date = datetime(year, month + 1, day)
+
+                return target_date, None
+            except ValueError:
+                # Если день не подходит для текущего месяца, пробуем следующий
+                if month == 12:
+                    try:
+                        return datetime(year + 1, 1, day), None
+                    except ValueError:
+                        return None, f"❌ Неверный день: {day}"
+                else:
+                    try:
+                        return datetime(year, month + 1, day), None
+                    except ValueError:
+                        return None, f"❌ Неверный день: {day}"
+
+        return None, f"❌ Неверный формат даты: {date_str}"
+
+    def parse_time_part(self, time_str: str) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+        """Парсит часть со временем."""
+        time_str = time_str.strip()
+
+        # Формат: ЧЧ:ММ
+        pattern = r'^(\d{1,2}):(\d{1,2})$'
+        match = re.match(pattern, time_str)
+        if match:
+            hour, minute = map(int, match.groups())
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                return hour, minute, None
+            else:
+                return None, None, f"❌ Неверное время: {time_str} (часы 0-23, минуты 0-59)"
+
+        return None, None, f"❌ Неверный формат времени: {time_str}. Используйте ЧЧ:ММ"
+
+    def parse_datetime(self, date_str: str, time_str: Optional[str] = None) -> Tuple[Optional[datetime], Optional[str]]:
+        """
+        Основной метод парсинга даты и времени.
+        Поддерживает:
+        - Относительные даты (завтра, через месяц)
+        - Форматы: ДД, ДД.ММ, ДД.ММ.ГГГГ
+        - Время опционально, если не указано - 00:00
+        """
+        # Парсим дату (получаем naive datetime)
+        target_date, error = self.parse_date_part(date_str)
+        if error:
+            return None, error
+
+        # Если время не указано, устанавливаем 00:00
+        if not time_str:
+            hour, minute = 0, 0
+        else:
+            hour, minute, error = self.parse_time_part(time_str)
+            if error:
+                return None, error
+
+        # Устанавливаем время (target_date уже naive)
+        target_datetime = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+        # Проверяем, что время в будущем (сравниваем naive datetime с self.now без timezone)
+        now_naive = self.now.replace(tzinfo=None)
+        if target_datetime <= now_naive:
+            # Если время сегодня и указано, но уже прошло - переносим на завтра
+            if target_datetime.date() == now_naive.date() and time_str:
+                target_datetime += timedelta(days=1)
+            else:
+                return None, "❌ Время должно быть в будущем!"
+
+        # Локализуем в московское время только в конце
+        return MOSCOW_TZ.localize(target_datetime), None
+
+    def extract_datetime_from_parts(self, parts: list) -> Tuple[Optional[datetime], int, Optional[str]]:
+        """
+        Извлекает дату и время из списка частей команды.
+        Возвращает: (datetime, индекс после разобранных частей, ошибка)
+        """
+        if not parts:
+            return None, 0, "❌ Не указана дата"
+
+        # Пробуем разные комбинации
+        # Сначала ищем время (формат ЧЧ:ММ)
+        time_index = -1
+        time_str = None
+
+        for i, part in enumerate(parts):
+            if re.match(r'^\d{1,2}:\d{1,2}$', part):
+                time_index = i
+                time_str = part
+                break
+
+        # Если нашли время, дата должна быть перед ним
+        if time_index > 0:
+            # Пробуем объединить предыдущие части как дату
+            date_str = ' '.join(parts[:time_index])
+            dt, error = self.parse_datetime(date_str, time_str)
+            if not error:
+                return dt, time_index + 1, None
+
+        # Если время не нашли или не удалось распарсить с ним,
+        # пробуем все части как дату
+        date_str = ' '.join(parts)
+        dt, error = self.parse_datetime(date_str, None)
+
+        if not error:
+            return dt, len(parts), None
+
+        # Если не получилось, пробуем первую часть как дату, остальное как время?
+        if len(parts) >= 2:
+            dt, error = self.parse_datetime(parts[0], parts[1])
+            if not error:
+                return dt, 2, None
+
+        return None, 0, f"❌ Не удалось распознать дату/время: {' '.join(parts)}"
+
+
+# Создаем экземпляр парсера
+dt_parser = DateTimeParser()
+
+
 def parse_description_command(text: str) -> tuple[bool, str, str, str, str]:
     """
     Парсит команду для описания с поддержкой многострочного текста.
-    Формат: +описание [дата] [время] [тип]
+    Формат: +описание [дата/время] [тип]
     [многострочный текст]
     """
     try:
-        # Разделяем первую строку (команду) и остальной текст
         lines = text.split('\n', 1)
         if len(lines) < 2:
             return False, "❌ Описание должно быть на новой строке", "", "", ""
@@ -108,21 +378,35 @@ def parse_description_command(text: str) -> tuple[bool, str, str, str, str]:
         if not description_text:
             return False, "❌ Описание не может быть пустым", "", "", ""
 
-        # Парсим команду: +описание [дата] [время] [тип]
+        # Парсим команду
         parts = command_line.split()
-        if len(parts) < 4:
-            return False, "❌ Неверный формат команды.\n✅ Используйте: +описание ДД.ММ.ГГГГ ЧЧ:ММ тип\n[текст описания на новой строке]", "", "", ""
+        if len(parts) < 2:
+            return False, "❌ Неверный формат команды.\n✅ Используйте: +описание [дата/время] [тип]\n[текст описания]", "", "", ""
 
-        # Проверяем префикс команды
+        # Проверяем префикс
         if not parts[0].startswith(('+', '!', '/', '.')):
             return False, "❌ Неверный префикс команды", "", "", ""
 
-        # Извлекаем дату, время и тип
-        date_str = parts[1]
-        time_str = parts[2]
-        repeat_type_input = ' '.join(parts[3:])  # Объединяем оставшиеся части на случай пробелов в типе
+        # Удаляем префикс команды
+        command_parts = parts[1:] if parts[0].lstrip('+!/.').lower() == 'описание' else parts
+
+        if not command_parts:
+            return False, "❌ Укажите дату и тип повторения", "", "", ""
+
+        # Извлекаем дату/время и тип
+        dt, used_parts, error = dt_parser.extract_datetime_from_parts(command_parts)
+        if error:
+            return False, error, "", "", ""
+
+        # Оставшиеся части - это тип повторения
+        remaining_parts = command_parts[used_parts:]
+        repeat_type_input = ' '.join(remaining_parts) if remaining_parts else 'once'
+
+        date_str = dt.strftime("%d.%m.%Y")
+        time_str = dt.strftime("%H:%M")
 
         return True, description_text, date_str, time_str, repeat_type_input
+
     except Exception as e:
         logger.error(f"Ошибка парсинга команды описания: {e}", exc_info=True)
         return False, f"❌ Ошибка парсинга команды", "", "", ""
@@ -130,12 +414,11 @@ def parse_description_command(text: str) -> tuple[bool, str, str, str, str]:
 
 def parse_title_command(text: str) -> tuple[bool, str, str, str, str]:
     """
-    Парсит команду для названия с поддержкой многострочного текста.
-    Формат: +менять название [дата] [время] [тип]
-    [многострочный текст]
+    Парсит команду для названия.
+    Формат: +менять название [дата/время] [тип]
+    [текст названия]
     """
     try:
-        # Разделяем первую строку (команду) и остальной текст
         lines = text.split('\n', 1)
         if len(lines) < 2:
             return False, "❌ Название должно быть на новой строке", "", "", ""
@@ -146,29 +429,40 @@ def parse_title_command(text: str) -> tuple[bool, str, str, str, str]:
         if not title_text:
             return False, "❌ Название не может быть пустым", "", "", ""
 
-        # Парсим команду: +менять название [дата] [время] [тип]
+        # Парсим команду
         parts = command_line.split()
-        if len(parts) < 5:
-            return False, "❌ Неверный формат команды.\n✅ Используйте: +менять название ДД.ММ.ГГГГ ЧЧ:ММ тип\n[текст названия на новой строке]", "", "", ""
+        if len(parts) < 3:
+            return False, "❌ Неверный формат команды.\n✅ Используйте: +менять название [дата/время] [тип]\n[текст названия]", "", "", ""
 
-        # Проверяем префикс команды
+        # Проверяем префикс и ключевые слова
         if not parts[0].startswith(('+', '!', '/', '.')):
             return False, "❌ Неверный префикс команды", "", "", ""
 
         # Проверяем что это команда "менять название"
-        command_words = [parts[1].lower(), parts[2].lower()]
-        if 'менять' not in command_words and 'изменить' not in command_words:
+        cmd = parts[0].lstrip('+!/.').lower()
+        if len(parts) < 2 or cmd != 'менять' or parts[1].lower() != 'название':
             return False, "❌ Неверная команда. Используйте: +менять название", "", "", ""
 
-        if 'название' not in command_words and 'title' not in command_words and 'имя' not in command_words:
-            return False, "❌ Неверная команда. Используйте: +менять название", "", "", ""
+        # Удаляем 'менять' и 'название'
+        command_parts = parts[2:]
 
-        # Извлекаем дату, время и тип
-        date_str = parts[3]
-        time_str = parts[4]
-        repeat_type_input = ' '.join(parts[5:]) if len(parts) > 5 else 'once'
+        if not command_parts:
+            return False, "❌ Укажите дату и тип повторения", "", "", ""
+
+        # Извлекаем дату/время и тип
+        dt, used_parts, error = dt_parser.extract_datetime_from_parts(command_parts)
+        if error:
+            return False, error, "", "", ""
+
+        # Оставшиеся части - это тип повторения
+        remaining_parts = command_parts[used_parts:]
+        repeat_type_input = ' '.join(remaining_parts) if remaining_parts else 'once'
+
+        date_str = dt.strftime("%d.%m.%Y")
+        time_str = dt.strftime("%H:%M")
 
         return True, title_text, date_str, time_str, repeat_type_input
+
     except Exception as e:
         logger.error(f"Ошибка парсинга команды названия: {e}", exc_info=True)
         return False, f"❌ Ошибка парсинга команды", "", "", ""
@@ -179,10 +473,14 @@ def parse_avatar_command(text: str, has_photo: bool = False, has_reply: bool = F
     """
     Парсит команду для аватарки.
     Варианты:
-    1. С фото в сообщении: +аватарка [описание?] [дата] [время] [тип]
-    2. С reply на фото: +аватарка [описание?] [дата] [время] [тип]
+    1. С фото в сообщении: +аватарка [дата/время] [тип] [описание?]
+    2. С reply на фото: +аватарка [дата/время] [тип] [описание?]
     """
     try:
+        # Проверяем наличие фото
+        if not has_photo and not has_reply:
+            return False, "❌ Для аватарки необходимо прикрепить фото к сообщению или ответить на фото", "", "", ""
+
         # Удаляем префикс команды
         text = text.strip()
         prefixes = ['+аватарка', '!аватарка', '/аватарка', '.аватарка']
@@ -191,36 +489,34 @@ def parse_avatar_command(text: str, has_photo: bool = False, has_reply: bool = F
                 text = text[len(prefix):].strip()
                 break
 
-        # Если нет фото в сообщении или в ответе, возвращаем ошибку
-        if not has_photo and not has_reply:
-            return False, "❌ Для аватарки необходимо прикрепить фото к сообщению или ответить на фото", "", "", ""
+        if not text:
+            return False, "❌ Укажите дату и тип повторения", "", "", ""
 
-        # Формат: [описание?] [дата] [время] [тип]
+        # Разбиваем на части
         parts = text.split()
 
-        # Пытаемся найти дату в формате ДД.ММ.ГГГГ
-        date_pattern = r'^\d{2}\.\d{2}\.\d{4}$'
-        date_index = -1
-        for i, part in enumerate(parts):
-            if re.match(date_pattern, part):
-                date_index = i
-                break
+        # Извлекаем дату/время и тип
+        dt, used_parts, error = dt_parser.extract_datetime_from_parts(parts)
+        if error:
+            return False, error, "", "", ""
 
-        if date_index == -1:
-            return False, "❌ Не найдена дата в формате ДД.ММ.ГГГГ", "", "", ""
+        # Оставшиеся части - это тип повторения и описание
+        remaining_parts = parts[used_parts:]
 
-        # Описание - все до даты
-        description = ' '.join(parts[:date_index]) if date_index > 0 else ""
+        # Первое из оставшихся - тип повторения, остальное - описание
+        repeat_type_input = 'once'
+        description = ''
 
-        # Проверяем что после даты есть время и тип
-        if len(parts) < date_index + 3:
-            return False, "❌ Неверный формат. После даты должно быть время и тип", "", "", ""
+        if remaining_parts:
+            repeat_type_input = remaining_parts[0]
+            if len(remaining_parts) > 1:
+                description = ' '.join(remaining_parts[1:])
 
-        date_str = parts[date_index]
-        time_str = parts[date_index + 1]
-        repeat_type_input = ' '.join(parts[date_index + 2:])
+        date_str = dt.strftime("%d.%m.%Y")
+        time_str = dt.strftime("%H:%M")
 
         return True, description, date_str, time_str, repeat_type_input
+
     except Exception as e:
         logger.error(f"Ошибка парсинга команды аватарки: {e}", exc_info=True)
         return False, f"❌ Ошибка парсинга команды", "", "", ""
@@ -236,22 +532,39 @@ def parse_quick_avatar_command(text: str, day: str) -> tuple[bool, str, str, str
                 text = text[len(prefix):].strip()
                 break
 
-        # Формат: [время] [тип] [описание?]
-        parts = text.split()
-        if len(parts) < 2:
-            return False, "❌ Неверный формат. Используйте: ЧЧ:ММ тип [описание?]", "", ""
+        if not text:
+            return False, "❌ Укажите время и тип повторения", "", ""
 
-        time_str = parts[0]
-        repeat_type_input = parts[1]
-        description = ' '.join(parts[2:]) if len(parts) > 2 else ""
+        parts = text.split()
+
+        # Ищем время
+        time_str = None
+        time_index = -1
+        for i, part in enumerate(parts):
+            if re.match(r'^\d{1,2}:\d{1,2}$', part):
+                time_str = part
+                time_index = i
+                break
+
+        if not time_str:
+            return False, "❌ Укажите время в формате ЧЧ:ММ", "", ""
+
+        # Тип повторения - следующий после времени
+        if len(parts) > time_index + 1:
+            repeat_type_input = parts[time_index + 1]
+            # Описание - все остальное
+            description = ' '.join(parts[time_index + 2:]) if len(parts) > time_index + 2 else ""
+        else:
+            return False, "❌ Укажите тип повторения", "", ""
 
         return True, time_str, repeat_type_input, description
+
     except Exception as e:
         logger.error(f"Ошибка парсинга быстрой команды аватарки: {e}", exc_info=True)
         return False, f"❌ Ошибка парсинга команды", "", ""
 
 
-
+# Исправленная функция проверки прав для callback
 async def _check_chat_admin_callback(callback: CallbackQuery) -> bool:
     """Проверяет права для callback-запросов."""
     try:
@@ -274,10 +587,9 @@ def _get_repeat_text(repeat_type: str) -> str:
     return REPEAT_TYPE_DISPLAY.get(repeat_type, 'Неизвестно')
 
 
-@auto_chat_router.message(F.text.regexp(r'^[+]название чата'))
+@auto_chat_router.message(F.text.regexp(r'^[+!/.].*менять название'))
 async def schedule_title_change(msg: Message):
     """Добавляет запланированное изменение названия чата."""
-
     user_id = msg.from_user.id
     chat_id = msg.chat.id
 
@@ -285,74 +597,38 @@ async def schedule_title_change(msg: Message):
         return
 
     try:
-        # === Парсинг внутри функции (без parse_title_command) ===
-        lines = msg.html_text.split("\n", 1)
-        if len(lines) < 2:
-            await msg.reply("❌ Название должно быть на новой строке")
+        success, title_text, date_str, time_str, repeat_type_input = parse_title_command(msg.text)
+        if not success:
+            await msg.reply(title_text)
             return
 
-        command_line = lines[0].strip()
-        title_text = lines[1].strip()
-
-        if not title_text:
-            await msg.reply("❌ Название не может быть пустым")
+        # Проверяем длину названия
+        is_valid, error_msg = validate_text_length(title_text, 255, "Название")
+        if not is_valid:
+            await msg.reply(error_msg)
             return
 
-        parts = command_line.split()
-        if len(parts) < 5:
-            await msg.reply(
-                "❌ Неверный формат команды.\n"
-                "✅ Используйте: +название чата ДД.ММ.ГГГГ ЧЧ:ММ тип\n"
-                "[текст названия на новой строке]"
-            )
+        # Валидируем тип повторения
+        is_valid, repeat_type_result = validate_repeat_type(repeat_type_input)
+        if not is_valid:
+            await msg.reply(repeat_type_result)
             return
+        repeat_type = repeat_type_result
 
-        # Проверка префикса и команды
-        if not parts[0].startswith(('+', '!', '/', '.')):
-            await msg.reply("❌ Неверный префикс команды")
-            return
-
-        # parts[0] = '+название', parts[1] = 'чата'
-        base_cmd = parts[0][1:].lower()  # 'название'
-        second_word = parts[1].lower()   # 'чата'
-
-        if base_cmd != 'название' or second_word != 'чата':
-            await msg.reply("❌ Неверная команда. Используйте: +название чата")
-            return
-
-        date_str = parts[2]
-        time_str = parts[3]
-        repeat_type_input = ' '.join(parts[4:])
-
-        # === Валидация длины ===
-        if len(title_text) > 255:
-            await msg.reply(f"❌ Название не может превышать 255 символов (сейчас: {len(title_text)})")
-            return
-
-        # === Валидация типа повторения ===
-        repeat_type = parse_repeat_type(repeat_type_input)
-        valid_types = ['once', 'daily', 'weekly', 'monthly', 'yearly']
-        if repeat_type not in valid_types:
-            russian_types = ['одноразово', 'ежедневно', 'еженедельно', 'ежемесячно', 'ежегодно']
-            await msg.reply(f"❌ Неверный тип повторения.\n📝 Доступные: {', '.join(russian_types)}")
-            return
-
-        # === Парсинг и валидация времени ===
+        # Парсим дату и время
         try:
             scheduled_time_naive = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+            scheduled_time = MOSCOW_TZ.localize(scheduled_time_naive)
         except ValueError:
-            await msg.reply("❌ Ошибка в формате даты/времени.\n📅 Используйте формат: ДД.ММ.ГГГГ ЧЧ:ММ")
+            await msg.reply("❌ Ошибка в формате даты/времени.")
             return
 
-        moscow_tz = pytz.timezone("Europe/Moscow")
-        scheduled_time = moscow_tz.localize(scheduled_time_naive)
-        now_moscow = datetime.now(moscow_tz)
-
+        now_moscow = datetime.now(MOSCOW_TZ)
         if scheduled_time <= now_moscow:
             await msg.reply("❌ Время должно быть в будущем!")
             return
 
-        # === Сохранение в БД ===
+        # Сохраняем в БД
         success = await add_scheduled_change(
             chat_id=chat_id,
             change_type='title',
@@ -364,9 +640,7 @@ async def schedule_title_change(msg: Message):
 
         if success:
             repeat_text = _get_repeat_text(repeat_type)
-            display_title = title_text
-            if len(display_title) > 100:
-                display_title = display_title[:97] + "..."
+            display_title = title_text if len(title_text) <= 100 else title_text[:97] + "..."
 
             await msg.reply(
                 f"✅ Запланировано изменение названия:\n"
@@ -383,188 +657,7 @@ async def schedule_title_change(msg: Message):
         logger.error(f"Ошибка в schedule_title_change: {e}", exc_info=True)
 
 
-#@auto_chat_router.message(F.text.regexp(r'^[+!/.]завтра название'))
-async def schedule_title_tomorrow(msg: Message):
-    """Быстрое планирование изменения названия на завтра."""
-    user_id = msg.from_user.id
-    chat_id = msg.chat.id
-
-    if not await auto_check_AccessLevel_for_rang(user_id, chat_id, 39):
-        return
-
-    try:
-        # Формат: +завтра название [время] [тип]\n[название]
-        lines = msg.text.split('\n', 1)
-        if len(lines) < 2:
-            await msg.reply(
-                "❌ Формат: +завтра название ЧЧ:ММ тип\n"
-                "[название на новой строке]\n"
-                "Пример:\n"
-                "+завтра название 14:30 ежедневно\n"
-                "Новое название чата"
-            )
-            return
-
-        command_line = lines[0].strip()
-        title_text = lines[1].strip()
-
-        # Парсим команду
-        parts = command_line.split()
-        if len(parts) < 4:
-            await msg.reply("❌ Неверный формат. Используйте: +завтра название ЧЧ:ММ тип")
-            return
-
-        time_str = parts[2]
-        repeat_type_input = parts[3]
-
-        # Проверяем длину названия
-        is_valid_length, length_error = validate_text_length(title_text, 255, "Название")
-        if not is_valid_length:
-            await msg.reply(length_error)
-            return
-
-        # Валидируем тип повторения
-        is_valid, repeat_type_result = validate_repeat_type(repeat_type_input)
-        if not is_valid:
-            await msg.reply(repeat_type_result)
-            return
-        repeat_type = repeat_type_result
-
-        # Завтрашняя дата
-        tomorrow = datetime.now() + timedelta(days=1)
-        date_str = tomorrow.strftime("%d.%m.%Y")
-
-        # Создаем полное время
-        try:
-            scheduled_time = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
-        except ValueError:
-            await msg.reply("❌ Неверный формат времени. Используйте: ЧЧ:ММ")
-            return
-
-        # Добавляем в базу
-        success = await add_scheduled_change(
-            chat_id=chat_id,
-            change_type='title',
-            new_value=title_text,
-            scheduled_time=scheduled_time,
-            repeat_type=repeat_type,
-            created_by=user_id
-        )
-
-        if success:
-            repeat_text = _get_repeat_text(repeat_type)
-            # Обрезаем длинное название для отображения
-            display_title = title_text
-            if len(display_title) > 100:
-                display_title = display_title[:97] + "..."
-
-            await msg.reply(
-                f"✅ Запланировано изменение названия:\n"
-                f"📝 Название: {display_title}\n"
-                f"⏰ Завтра в {time_str}\n"
-                f"🔄 Повторение: {repeat_text}"
-            )
-        else:
-            await msg.reply("❌ Не удалось запланировать изменение.")
-    except Exception as e:
-        await msg.reply("❌ Произошла ошибка при обработке команды.")
-        logger.error(f"Ошибка в schedule_title_tomorrow: {e}", exc_info=True)
-
-
-#@auto_chat_router.message(F.text.regexp(r'^[+!/.]сегодня название'))
-async def schedule_title_today(msg: Message):
-    """Быстрое планирование изменения названия на сегодня."""
-    user_id = msg.from_user.id
-    chat_id = msg.chat.id
-
-    if not await auto_check_AccessLevel_for_rang(user_id, chat_id, 39):
-        return
-
-    try:
-        # Формат: +сегодня название [время] [тип]\n[название]
-        lines = msg.text.split('\n', 1)
-        if len(lines) < 2:
-            await msg.reply(
-                "❌ Формат: +сегодня название ЧЧ:ММ тип\n"
-                "[название на новой строке]\n"
-                "Пример:\n"
-                "+сегодня название 14:30 ежедневно\n"
-                "Новое название чата"
-            )
-            return
-
-        command_line = lines[0].strip()
-        title_text = lines[1].strip()
-
-        # Парсим команду
-        parts = command_line.split()
-        if len(parts) < 4:
-            await msg.reply("❌ Неверный формат. Используйте: +сегодня название ЧЧ:ММ тип")
-            return
-
-        time_str = parts[2]
-        repeat_type_input = parts[3]
-
-        # Проверяем длину названия
-        is_valid_length, length_error = validate_text_length(title_text, 255, "Название")
-        if not is_valid_length:
-            await msg.reply(length_error)
-            return
-
-        # Валидируем тип повторения
-        is_valid, repeat_type_result = validate_repeat_type(repeat_type_input)
-        if not is_valid:
-            await msg.reply(repeat_type_result)
-            return
-        repeat_type = repeat_type_result
-
-        # Сегодняшняя дата
-        today = datetime.now()
-        date_str = today.strftime("%d.%m.%Y")
-
-        # Создаем полное время
-        try:
-            scheduled_time = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
-        except ValueError:
-            await msg.reply("❌ Неверный формат времени. Используйте: ЧЧ:ММ")
-            return
-
-        # Проверяем, что время в будущем
-        if scheduled_time <= datetime.now():
-            await msg.reply("❌ Время должно быть в будущем! Используйте время позже текущего.")
-            return
-
-        # Добавляем в базу
-        success = await add_scheduled_change(
-            chat_id=chat_id,
-            change_type='title',
-            new_value=title_text,
-            scheduled_time=scheduled_time,
-            repeat_type=repeat_type,
-            created_by=user_id
-        )
-
-        if success:
-            repeat_text = _get_repeat_text(repeat_type)
-            # Обрезаем длинное название для отображения
-            display_title = title_text
-            if len(display_title) > 100:
-                display_title = display_title[:97] + "..."
-
-            await msg.reply(
-                f"✅ Запланировано изменение названия:\n"
-                f"📝 Название: {display_title}\n"
-                f"⏰ Сегодня в {time_str}\n"
-                f"🔄 Повторение: {repeat_text}"
-            )
-        else:
-            await msg.reply("❌ Не удалось запланировать изменение.")
-    except Exception as e:
-        await msg.reply("❌ Произошла ошибка при обработке команды.")
-        logger.error(f"Ошибка в schedule_title_today: {e}", exc_info=True)
-
-
-@auto_chat_router.message(F.text.regexp(r'^[+]описание'))
+@auto_chat_router.message(F.text.regexp(r'^[+!/.].*описание'))
 async def schedule_description_change(msg: Message):
     """Добавляет запланированное изменение описания."""
     user_id = msg.from_user.id
@@ -576,13 +669,13 @@ async def schedule_description_change(msg: Message):
     try:
         success, description_text, date_str, time_str, repeat_type_input = parse_description_command(msg.text)
         if not success:
-            await msg.reply(description_text)  # В этом случае description_text содержит сообщение об ошибке
+            await msg.reply(description_text)
             return
 
         # Проверяем длину описания
-        is_valid_length, length_error = validate_text_length(description_text, 255, "Описание")
-        if not is_valid_length:
-            await msg.reply(length_error)
+        is_valid, error_msg = validate_text_length(description_text, 255, "Описание")
+        if not is_valid:
+            await msg.reply(error_msg)
             return
 
         # Валидируем тип повторения
@@ -592,14 +685,16 @@ async def schedule_description_change(msg: Message):
             return
         repeat_type = repeat_type_result
 
-        # Создаем дату и время
+        # Парсим дату и время
         try:
-            scheduled_time = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+            scheduled_time_naive = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+            scheduled_time = MOSCOW_TZ.localize(scheduled_time_naive)
         except ValueError:
-            await msg.reply("❌ Ошибка в формате даты/времени.\n📅 Используйте формат: ДД.ММ.ГГГГ ЧЧ:ММ")
+            await msg.reply("❌ Ошибка в формате даты/времени.")
             return
 
-        if scheduled_time <= datetime.now():
+        now_moscow = datetime.now(MOSCOW_TZ)
+        if scheduled_time <= now_moscow:
             await msg.reply("❌ Время должно быть в будущем!")
             return
 
@@ -614,10 +709,7 @@ async def schedule_description_change(msg: Message):
 
         if success:
             repeat_text = _get_repeat_text(repeat_type)
-            # Обрезаем длинное описание для отображения
-            display_desc = description_text
-            if len(display_desc) > 100:
-                display_desc = display_desc[:97] + "..."
+            display_desc = description_text if len(description_text) <= 100 else description_text[:97] + "..."
 
             await msg.reply(
                 f"✅ Запланировано изменение описания:\n"
@@ -628,194 +720,16 @@ async def schedule_description_change(msg: Message):
             )
         else:
             await msg.reply("❌ Не удалось запланировать изменение.")
+
     except Exception as e:
         await msg.reply("❌ Произошла ошибка при обработке команды.")
         logger.error(f"Ошибка в schedule_description_change: {e}", exc_info=True)
 
 
-#@auto_chat_router.message(F.text.regexp(r'^[+!/.]завтра описание'))
-async def schedule_description_tomorrow(msg: Message):
-    """Быстрое планирование изменения описания на завтра."""
-    user_id = msg.from_user.id
-    chat_id = msg.chat.id
-
-    if not await auto_check_AccessLevel_for_rang(user_id, chat_id, 39):
-        return
-
-    try:
-        # Формат: +завтра описание [время] [тип]\n[описание]
-        lines = msg.text.split('\n', 1)
-        if len(lines) < 2:
-            await msg.reply(
-                "❌ Формат: +завтра описание ЧЧ:ММ тип\n"
-                "[описание на новой строке]\n"
-                "Пример:\n"
-                "+завтра описание 14:30 ежедневно\n"
-                "Новое описание чата"
-            )
-            return
-
-        command_line = lines[0].strip()
-        description_text = lines[1].strip()
-
-        # Парсим команду
-        parts = command_line.split()
-        if len(parts) < 4:
-            await msg.reply("❌ Неверный формат. Используйте: +завтра описание ЧЧ:ММ тип")
-            return
-
-        time_str = parts[2]
-        repeat_type_input = parts[3]
-
-        # Проверяем длину описания
-        is_valid_length, length_error = validate_text_length(description_text, 255, "Описание")
-        if not is_valid_length:
-            await msg.reply(length_error)
-            return
-
-        # Валидируем тип повторения
-        is_valid, repeat_type_result = validate_repeat_type(repeat_type_input)
-        if not is_valid:
-            await msg.reply(repeat_type_result)
-            return
-        repeat_type = repeat_type_result
-
-        # Завтрашняя дата
-        tomorrow = datetime.now() + timedelta(days=1)
-        date_str = tomorrow.strftime("%d.%m.%Y")
-
-        # Создаем полное время
-        try:
-            scheduled_time = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
-        except ValueError:
-            await msg.reply("❌ Неверный формат времени. Используйте: ЧЧ:ММ")
-            return
-
-        # Добавляем в базу
-        success = await add_scheduled_change(
-            chat_id=chat_id,
-            change_type='description',
-            new_value=description_text,
-            scheduled_time=scheduled_time,
-            repeat_type=repeat_type,
-            created_by=user_id
-        )
-
-        if success:
-            repeat_text = _get_repeat_text(repeat_type)
-            # Обрезаем длинное описание для отображения
-            display_desc = description_text
-            if len(display_desc) > 100:
-                display_desc = display_desc[:97] + "..."
-
-            await msg.reply(
-                f"✅ Запланировано изменение описания:\n"
-                f"📝 Описание: {display_desc}\n"
-                f"⏰ Завтра в {time_str}\n"
-                f"🔄 Повторение: {repeat_text}"
-            )
-        else:
-            await msg.reply("❌ Не удалось запланировать изменение.")
-    except Exception as e:
-        await msg.reply("❌ Произошла ошибка при обработке команды.")
-        logger.error(f"Ошибка в schedule_description_tomorrow: {e}", exc_info=True)
-
-
-#@auto_chat_router.message(F.text.regexp(r'^[+!/.]сегодня описание'))
-async def schedule_description_today(msg: Message):
-    """Быстрое планирование изменения описания на сегодня."""
-    user_id = msg.from_user.id
-    chat_id = msg.chat.id
-
-    if not await auto_check_AccessLevel_for_rang(user_id, chat_id, 39):
-        return
-
-    try:
-        # Формат: +сегодня описание [время] [тип]\n[описание]
-        lines = msg.text.split('\n', 1)
-        if len(lines) < 2:
-            await msg.reply(
-                "❌ Формат: +сегодня описание ЧЧ:ММ тип\n"
-                "[описание на новой строке]\n"
-                "Пример:\n"
-                "+сегодня описание 14:30 ежедневно\n"
-                "Новое описание чата"
-            )
-            return
-
-        command_line = lines[0].strip()
-        description_text = lines[1].strip()
-
-        # Парсим команду
-        parts = command_line.split()
-        if len(parts) < 4:
-            await msg.reply("❌ Неверный формат. Используйте: +сегодня описание ЧЧ:ММ тип")
-            return
-
-        time_str = parts[2]
-        repeat_type_input = parts[3]
-
-        # Проверяем длину описания
-        is_valid_length, length_error = validate_text_length(description_text, 255, "Описание")
-        if not is_valid_length:
-            await msg.reply(length_error)
-            return
-
-        # Валидируем тип повторения
-        is_valid, repeat_type_result = validate_repeat_type(repeat_type_input)
-        if not is_valid:
-            await msg.reply(repeat_type_result)
-            return
-        repeat_type = repeat_type_result
-
-        # Сегодняшняя дата
-        today = datetime.now()
-        date_str = today.strftime("%d.%m.%Y")
-
-        # Создаем полное время
-        try:
-            scheduled_time = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
-        except ValueError:
-            await msg.reply("❌ Неверный формат времени. Используйте: ЧЧ:ММ")
-            return
-
-        # Проверяем, что время в будущем
-        if scheduled_time <= datetime.now():
-            await msg.reply("❌ Время должно быть в будущем! Используйте время позже текущего.")
-            return
-
-        # Добавляем в базу
-        success = await add_scheduled_change(
-            chat_id=chat_id,
-            change_type='description',
-            new_value=description_text,
-            scheduled_time=scheduled_time,
-            repeat_type=repeat_type,
-            created_by=user_id
-        )
-
-        if success:
-            repeat_text = _get_repeat_text(repeat_type)
-            # Обрезаем длинное описание для отображения
-            display_desc = description_text
-            if len(display_desc) > 100:
-                display_desc = display_desc[:97] + "..."
-
-            await msg.reply(
-                f"✅ Запланировано изменение описания:\n"
-                f"📝 Описание: {display_desc}\n"
-                f"⏰ Сегодня в {time_str}\n"
-                f"🔄 Повторение: {repeat_text}"
-            )
-        else:
-            await msg.reply("❌ Не удалось запланировать изменение.")
-    except Exception as e:
-        await msg.reply("❌ Произошла ошибка при обработке команды.")
-        logger.error(f"Ошибка в schedule_description_today: {e}", exc_info=True)
-
-
-# Команда для аватарки с поддержкой фото в сообщении
-@auto_chat_router.message(F.text.regexp(r'^[+]аватарка') | F.caption.regexp(r'^[+]аватарка'))
+@auto_chat_router.message(F.photo)
+@auto_chat_router.message(F.reply_to_message & F.reply_to_message.photo)
+@auto_chat_router.message(F.text.regexp(r'^[+!/.].*аватарка'))
+@auto_chat_router.message(F.caption.regexp(r'^[+!/.].*аватарка'))
 async def schedule_avatar_change(msg: Message):
     """Добавляет запланированное изменение аватарки."""
     user_id = msg.from_user.id
@@ -825,28 +739,33 @@ async def schedule_avatar_change(msg: Message):
         return
 
     try:
+        # Проверяем лимит на частоту изменений аватарки
+        can_change, limit_message = await check_avatar_rate_limit(chat_id)
+        if not can_change:
+            await msg.reply(limit_message)
+            return
+
         # Проверяем, есть ли фото в сообщении
         has_photo = bool(msg.photo)
-        # Проверяем, есть ли reply с фото
         has_reply_photo = bool(msg.reply_to_message and msg.reply_to_message.photo)
 
-        # Если нет фото, отправляем ошибку
         if not has_photo and not has_reply_photo:
             await msg.reply(
                 "❌ Для аватарки необходимо:\n"
                 "1. Прикрепить фото к сообщению с командой в подписи\n"
                 "2. Или ответить на фото командой\n"
                 "Пример подписи:\n"
-                "+аватарка 25.12.2024 14:30 ежедневно"
+                "+аватарка завтра 14:30 ежедневно\n"
+                "или\n"
+                "+аватарка 25.12 14:30 ежедневно"
             )
             return
 
         file_id = None
         file_unique_id = None
 
-        # Получаем file_id из фото в сообщении или reply
         if has_photo:
-            photo: PhotoSize = msg.photo[-1]  # Берем фото самого высокого качества
+            photo: PhotoSize = msg.photo[-1]
             file_id = photo.file_id
             file_unique_id = photo.file_unique_id
             command_text = msg.caption or ""
@@ -856,8 +775,9 @@ async def schedule_avatar_change(msg: Message):
             file_unique_id = photo.file_unique_id
             command_text = msg.text or ""
 
-        if not command_text.strip():
-            await msg.reply("❌ Команда не найдена. Убедитесь, что команда указана в подписи к фото или в тексте ответа.")
+        if not command_text or not command_text.strip():
+            await msg.reply(
+                "❌ Команда не найдена. Убедитесь, что команда указана в подписи к фото или в тексте ответа.")
             return
 
         # Парсим команду
@@ -876,36 +796,42 @@ async def schedule_avatar_change(msg: Message):
             return
         repeat_type = repeat_type_result
 
-        # Создаем дату и время
+        # Парсим дату и время
         try:
-            scheduled_time = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+            scheduled_time_naive = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+            scheduled_time = MOSCOW_TZ.localize(scheduled_time_naive)
         except ValueError:
-            await msg.reply("❌ Ошибка в формате даты/времени.\n📅 Используйте формат: ДД.ММ.ГГГГ ЧЧ:ММ")
+            await msg.reply("❌ Ошибка в формате даты/времени.")
             return
 
-        if scheduled_time <= datetime.now():
+        now_moscow = datetime.now(MOSCOW_TZ)
+        if scheduled_time <= now_moscow:
             await msg.reply("❌ Время должно быть в будущем!")
             return
 
-        # Добавляем в базу
+        # Сохраняем в БД
         success = await add_scheduled_change(
             chat_id=chat_id,
             change_type='avatar',
-            new_value=description if description else "Аватарка из фото",
+            new_value=description if description else "Аватарка",
             scheduled_time=scheduled_time,
             repeat_type=repeat_type,
             created_by=user_id,
             file_id=file_id,
-            file_unique_id=file_unique_id
+            file_unique_id=file_unique_id,
+            notes=description if description else None
         )
 
         if success:
+            # Обновляем время последнего изменения (для планируемых изменений тоже учитываем)
+            await update_avatar_change_time(chat_id)
+
             repeat_text = _get_repeat_text(repeat_type)
             response = (
                 f"✅ Запланирована смена аватарки:\n"
                 f"⏰ Когда: {date_str} {time_str}\n"
                 f"🔄 Повторение: {repeat_text}\n"
-                f"🆔 Используйте !уддалить аватарку [ID] для отмены"
+                f"🆔 Используйте !удалить аватарку [ID] для отмены"
             )
 
             if description:
@@ -914,16 +840,13 @@ async def schedule_avatar_change(msg: Message):
             await msg.reply_photo(file_id, caption=response)
         else:
             await msg.reply("❌ Не удалось запланировать изменение. Возможно, такое уже существует.")
-    except ValueError as e:
-        await msg.reply("❌ Ошибка формата. Проверьте правильность введенных данных.")
-        logger.error(f"Ошибка формата в schedule_avatar_change: {e}", exc_info=True)
+
     except Exception as e:
         await msg.reply("❌ Произошла ошибка при обработке команды.")
         logger.error(f"Ошибка в schedule_avatar_change: {e}", exc_info=True)
 
 
-# Новая команда: быстрая аватарка (сегодня/завтра)
-#@auto_chat_router.message(F.text.regexp(r'^[+!/.](сегодня|завтра) аватарка'))
+@auto_chat_router.message(F.text.regexp(r'^[+!/.](завтра|сегодня) аватарка'))
 async def schedule_avatar_quick(msg: Message):
     """Быстрое планирование аватарки на сегодня/завтра."""
     user_id = msg.from_user.id
@@ -933,6 +856,12 @@ async def schedule_avatar_quick(msg: Message):
         return
 
     try:
+        # Проверяем лимит на частоту изменений аватарки
+        can_change, limit_message = await check_avatar_rate_limit(chat_id)
+        if not can_change:
+            await msg.reply(limit_message)
+            return
+
         # Определяем день
         text = msg.text.strip()
         day = 'сегодня' if 'сегодня' in text.lower() else 'завтра'
@@ -941,7 +870,6 @@ async def schedule_avatar_quick(msg: Message):
         has_photo = bool(msg.photo)
         has_reply_photo = bool(msg.reply_to_message and msg.reply_to_message.photo)
 
-        # Если нет фото, отправляем ошибку
         if not has_photo and not has_reply_photo:
             await msg.reply(
                 f"❌ Для аватарки необходимо:\n"
@@ -967,7 +895,7 @@ async def schedule_avatar_quick(msg: Message):
         # Парсим команду
         success, time_str, repeat_type_input, description = parse_quick_avatar_command(text, day)
         if not success:
-            await msg.reply(time_str)  # В этом случае time_str содержит сообщение об ошибке
+            await msg.reply(time_str)
             return
 
         # Валидируем тип повторения
@@ -978,27 +906,28 @@ async def schedule_avatar_quick(msg: Message):
         repeat_type = repeat_type_result
 
         # Устанавливаем дату
-        today = datetime.now()
+        now_moscow = datetime.now(MOSCOW_TZ)
         if day == 'завтра':
-            target_date = today + timedelta(days=1)
+            target_date = now_moscow + timedelta(days=1)
         else:
-            target_date = today
+            target_date = now_moscow
 
         date_str = target_date.strftime("%d.%m.%Y")
 
         # Создаем полное время
         try:
-            scheduled_time = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+            scheduled_time_naive = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+            scheduled_time = MOSCOW_TZ.localize(scheduled_time_naive)
         except ValueError:
             await msg.reply("❌ Неверный формат времени. Используйте: ЧЧ:ММ")
             return
 
         # Проверяем, что время в будущем (для сегодня)
-        if day == 'сегодня' and scheduled_time <= datetime.now():
+        if day == 'сегодня' and scheduled_time <= now_moscow:
             await msg.reply("❌ Время должно быть в будущем! Используйте время позже текущего.")
             return
 
-        # Добавляем в базу
+        # Сохраняем в БД
         success = await add_scheduled_change(
             chat_id=chat_id,
             change_type='avatar',
@@ -1007,10 +936,14 @@ async def schedule_avatar_quick(msg: Message):
             repeat_type=repeat_type,
             created_by=user_id,
             file_id=file_id,
-            file_unique_id=file_unique_id
+            file_unique_id=file_unique_id,
+            notes=description if description else None
         )
 
         if success:
+            # Обновляем время последнего изменения
+            await update_avatar_change_time(chat_id)
+
             repeat_text = _get_repeat_text(repeat_type)
             response = (
                 f"✅ Запланирована смена аватарки:\n"
@@ -1024,12 +957,25 @@ async def schedule_avatar_quick(msg: Message):
             await msg.reply_photo(file_id, caption=response)
         else:
             await msg.reply("❌ Не удалось запланировать изменение.")
-    except ValueError as e:
-        await msg.reply("❌ Ошибка формата. Проверьте правильность введенных данных.")
-        logger.error(f"Ошибка формата в schedule_avatar_quick: {e}", exc_info=True)
+
     except Exception as e:
         await msg.reply("❌ Произошла ошибка при обработке команды.")
         logger.error(f"Ошибка в schedule_avatar_quick: {e}", exc_info=True)
+
+
+# Функция для проверки лимита при реальном применении изменений
+async def check_and_update_avatar_application(chat_id: int) -> Tuple[bool, Optional[str]]:
+    """
+    Проверяет лимит при реальном применении аватарки.
+    Вызывается из сервиса перед применением изменения.
+    """
+    return await check_avatar_rate_limit(chat_id)
+
+
+# Функция для обновления времени после применения аватарки
+async def update_avatar_after_application(chat_id: int):
+    """Обновляет время после успешного применения аватарки."""
+    await update_avatar_change_time(chat_id)
 
 
 # Команды для просмотра
@@ -1059,18 +1005,16 @@ async def view_all_changes(msg: Message):
     if not await auto_check_AccessLevel_for_rang(msg.from_user.id, chat_id, 40):
         return
 
-    # Парсим номер страницы
     page = 1
-    if msg.text.split()[-1].isdigit():
-        page = int(msg.text.split()[-1])
+    parts = msg.text.split()
+    if len(parts) > 1 and parts[-1].isdigit():
+        page = int(parts[-1])
 
-    # Получаем все изменения
     changes = await get_all_active_changes(chat_id)
     if not changes:
         await msg.reply("📭 Нет запланированных изменений для этого чата.")
         return
 
-    # Группируем по дате
     changes_by_date = {}
     for change in changes:
         date_key = change['scheduled_time'].strftime("%d.%m.%Y")
@@ -1078,11 +1022,9 @@ async def view_all_changes(msg: Message):
             changes_by_date[date_key] = []
         changes_by_date[date_key].append(change)
 
-    # Сортируем даты
     sorted_dates = sorted(changes_by_date.keys(),
                           key=lambda x: datetime.strptime(x, "%d.%m.%Y"))
 
-    # Пагинация по датам (3 даты на страницу)
     dates_per_page = 3
     total_pages = (len(sorted_dates) + dates_per_page - 1) // dates_per_page
     page = max(1, min(page, total_pages))
@@ -1090,7 +1032,6 @@ async def view_all_changes(msg: Message):
     end_idx = start_idx + dates_per_page
     current_dates = sorted_dates[start_idx:end_idx]
 
-    # Формируем сообщение
     response = f"📅 Все запланированные изменения (Страница {page}/{total_pages}):\n"
 
     for date_str in current_dates:
@@ -1104,7 +1045,6 @@ async def view_all_changes(msg: Message):
             }.get(change['change_type'], '📌')
             repeat_text = _get_repeat_text(change['repeat_type'])
 
-            # Обрезаем длинный текст для отображения
             display_value = change['new_value']
             if len(display_value) > 50:
                 display_value = display_value[:47] + "..."
@@ -1114,7 +1054,6 @@ async def view_all_changes(msg: Message):
                          f"  📋 {display_value}\n"
                          f"  🆔 ID: {change['id']}\n")
 
-    # Создаем клавиатуру пагинации
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
     row = []
 
@@ -1133,7 +1072,6 @@ async def view_all_changes(msg: Message):
     if row:
         keyboard.inline_keyboard.append(row)
 
-    # Добавляем кнопки для отдельных типов
     types_row = [
         InlineKeyboardButton(text="🏷️ Названия", callback_data="view_titles_1"),
         InlineKeyboardButton(text="🖼️ Аватарки", callback_data="view_avatars_1"),
@@ -1141,7 +1079,6 @@ async def view_all_changes(msg: Message):
     ]
     keyboard.inline_keyboard.append(types_row)
 
-    # Добавляем кнопку статистики
     keyboard.inline_keyboard.append([
         InlineKeyboardButton(text="📊 Статистика", callback_data="stats")
     ])
@@ -1149,8 +1086,7 @@ async def view_all_changes(msg: Message):
     await msg.reply(response, parse_mode='HTML', reply_markup=keyboard)
 
 
-# Новая команда: статистика
-#@auto_chat_router.message(F.text.regexp(r'^[!/.]статистика изменений$'))
+@auto_chat_router.message(F.text.regexp(r'^[!/.]статистика изменений$'))
 async def view_stats(msg: Message):
     """Показывает статистику по изменениям."""
     chat_id = msg.chat.id
@@ -1159,49 +1095,42 @@ async def view_stats(msg: Message):
         return
 
     try:
-        # Получаем статистику
         stats = await get_statistics(chat_id)
-        if not stats:
+        if not stats or not stats.get('type_stats'):
             await msg.reply("📭 Нет активных запланированных изменений.")
             return
 
-        response = "📊 <b>Статистика изменений чата:</b>\n"
+        response = "📊 <b>Статистика изменений чата:</b>\n\n"
 
-        # Статистика по типам
         response += "📈 <b>По типам:</b>\n"
         type_names = {'title': '🏷️ Названия', 'avatar': '🖼️ Аватарки', 'description': '📝 Описания'}
 
         for type_stat in stats.get('type_stats', []):
             change_type = type_stat['change_type']
-            active = type_stat.get('active', 0)
-            inactive = type_stat.get('inactive', 0)
-            response += f"  {type_names.get(change_type, change_type)}: {active} активных"
-            if inactive > 0:
-                response += f", {inactive} неактивных"
-            response += "\n"
+            count = type_stat.get('count', 0)
+            response += f"  {type_names.get(change_type, change_type)}: {count}\n"
 
-        # Статистика по повторениям
         response += "\n🔄 <b>По повторению:</b>\n"
         for repeat_stat in stats.get('repeat_stats', []):
             repeat_name = _get_repeat_text(repeat_stat['repeat_type'])
             response += f"  {repeat_name}: {repeat_stat['count']}\n"
 
-        # Ближайшие изменения
         upcoming_count = stats.get('upcoming_count', 0)
         response += f"\n⏰ <b>Ближайшие изменения (24ч):</b> {upcoming_count}\n"
 
-        # Последние изменения
-        recent_changes = stats.get('recent_changes', [])
-        if recent_changes:
-            response += "\n📋 <b>Последние изменения:</b>\n"
-            for i, change in enumerate(recent_changes[:5], 1):
-                date_str = change['scheduled_time'].strftime("%d.%m.%Y %H:%M") if change.get(
-                    'scheduled_time') else "N/A"
-                type_emoji = {'title': '🏷️', 'avatar': '🖼️', 'description': '📝'}.get(change.get('change_type', ''), '📌')
-                response += f"  {i}. {type_emoji} {date_str}\n"
+        # Добавляем информацию о лимите аватарок
+        last_avatar = _last_avatar_change.get(chat_id)
+        if last_avatar:
+            now = datetime.now(MOSCOW_TZ)
+            time_since = (now - last_avatar).total_seconds() / 60
+            if time_since < 5:
+                next_allowed = last_avatar + timedelta(minutes=5)
+                minutes_left = int(5 - time_since)
+                response += f"\n🖼️ <b>Лимит аватарок:</b> ⏳ {minutes_left} мин до следующего изменения\n"
+            else:
+                response += f"\n🖼️ <b>Лимит аватарок:</b> ✅ Можно менять\n"
 
-        # Общее количество
-        total_active = sum(stat.get('active', 0) for stat in stats.get('type_stats', []))
+        total_active = sum(stat.get('count', 0) for stat in stats.get('type_stats', []))
         response += f"\n📊 <b>Всего активных:</b> {total_active} изменений"
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
@@ -1225,7 +1154,6 @@ async def view_changes_by_date(msg: Message):
         return
 
     try:
-        # Извлекаем дату из команды
         date_match = re.search(r'(\d{2}\.\d{2}\.\d{4})', msg.text)
         if not date_match:
             await msg.reply("❌ Неверный формат даты. Используйте: !изменения на ДД.ММ.ГГГГ")
@@ -1234,13 +1162,11 @@ async def view_changes_by_date(msg: Message):
         date_str = date_match.group(1)
         target_date = datetime.strptime(date_str, "%d.%m.%Y")
 
-        # Получаем изменения на эту дату
         changes = await get_combined_changes_by_date(chat_id, target_date)
         if not changes:
             await msg.reply(f"📭 На {date_str} нет запланированных изменений.")
             return
 
-        # Группируем изменения по типу
         changes_by_type = {}
         for change in changes:
             if change['change_type'] not in changes_by_type:
@@ -1262,7 +1188,6 @@ async def view_changes_by_date(msg: Message):
                 time_str = change['scheduled_time'].strftime("%H:%M")
                 repeat_text = _get_repeat_text(change['repeat_type'])
 
-                # Обрезаем текст для отображения
                 display_value = change['new_value']
                 if len(display_value) > 40:
                     display_value = display_value[:37] + "..."
@@ -1271,7 +1196,6 @@ async def view_changes_by_date(msg: Message):
                              f"  📋 {display_value}\n"
                              f"  🆔 ID: {change['id']}\n")
 
-        # Кнопка для удаления всех изменений на эту дату
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(
                 text="🗑️ Удалить все на эту дату",
@@ -1286,22 +1210,19 @@ async def view_changes_by_date(msg: Message):
         logger.error(f"Ошибка в view_changes_by_date: {e}", exc_info=True)
 
 
-# Команда для удаления изменения с поддержкой русского
 @auto_chat_router.message(F.text.regexp(r'^[!/.]удалить (название|аватарку|описание)\s+\d+$'))
 async def delete_scheduled_change_by_type(msg: Message):
     """Удаляет запланированное изменение по типу и ID."""
     user_id = msg.from_user.id
 
-    if not await auto_check_AccessLevel_for_rang(msg.from_user.id, msg.from_user.id, 39):
+    if not await auto_check_AccessLevel_for_rang(msg.from_user.id, msg.chat.id, 39):
         return
 
     try:
-        # Извлекаем тип и ID
         parts = msg.text.split()
         type_russian = parts[1].lower()
         change_id = int(parts[2])
 
-        # Маппинг русских названий на английские
         type_mapping = {
             'название': 'title',
             'аватарку': 'avatar',
@@ -1313,26 +1234,17 @@ async def delete_scheduled_change_by_type(msg: Message):
             await msg.reply("❌ Неверный тип изменения. Используйте: название, аватарку или описание")
             return
 
-        # Получаем информацию об изменении
         change = await get_change_by_id(change_id)
         if not change:
             await msg.reply("❌ Изменение с таким ID не найдено.")
             return
 
-        # Проверяем тип
         if change['change_type'] != change_type:
             await msg.reply(f"❌ Изменение с ID {change_id} не является {type_russian}.")
             return
 
-        # Проверяем, что удаляет создатель или администратор
-        if change['created_by'] != user_id:
-            # Проверяем права агента
-            agent_rang = await check_agent_access(user_id)
-            if agent_rang <= 2:  # Только старшие агенты и выше
-                await msg.reply("❌ Вы не можете удалить это изменение.")
-                return
 
-        # Удаляем изменение
+
         success = await delete_change(change_id)
         if success:
             type_names = {
@@ -1352,106 +1264,12 @@ async def delete_scheduled_change_by_type(msg: Message):
         logger.error(f"Ошибка в delete_scheduled_change_by_type: {e}", exc_info=True)
 
 
-# Команда для отключения изменения (мягкое удаление)
-#@auto_chat_router.message(F.text.regexp(r'^[!/.]отключить изменение\s+\d+$'))
-async def deactivate_scheduled_change(msg: Message):
-    """Отключает запланированное изменение (мягкое удаление)."""
-    user_id = msg.from_user.id
-
-    if not await auto_check_AccessLevel_for_rang(user_id, msg.from_user.id, 39):
-        return
-
-    try:
-        change_id = int(msg.text.split()[-1])
-        change = await get_change_by_id(change_id)
-        if not change:
-            await msg.reply("❌ Изменение с таким ID не найдено.")
-            return
-
-        if change['created_by'] != user_id:
-            agent_rang = await check_agent_access(user_id)
-            if agent_rang <= 2:
-                await msg.reply("❌ Вы не можете отключить это изменение.")
-                return
-
-        # Деактивируем изменение
-        success = await deactivate_change(change_id)
-        if success:
-            type_names = {
-                'title': 'название',
-                'avatar': 'аватарку',
-                'description': 'описание'
-            }
-            type_name = type_names.get(change['change_type'], 'изменение')
-            await msg.reply(f"✅ Запланированная {type_name} (ID: {change_id}) отключена.\n"
-                            f"ℹ️ Его можно восстановить из архива.")
-        else:
-            await msg.reply("❌ Не удалось отключить изменение.")
-
-    except Exception as e:
-        await msg.reply("❌ Произошла ошибка при отключении.")
-        logger.error(f"Ошибка в deactivate_scheduled_change: {e}", exc_info=True)
-
-
-# Команда для восстановления отключенных изменений
-#@auto_chat_router.message(F.text.regexp(r'^[!/.]архив изменений(\s+\d+)?$'))
-async def view_archived_changes(msg: Message):
-    """Показывает отключенные (архивированные) изменения."""
-    chat_id = msg.chat.id
-
-    if not await auto_check_AccessLevel_for_rang(msg.from_user.id, chat_id, 39):
-        return
-
-    try:
-        page = 1
-        if msg.text.split()[-1].isdigit():
-            page = int(msg.text.split()[-1])
-
-        # Получаем отключенные изменения
-        changes, total = await get_changes_by_status(chat_id, is_active=False, page=page, limit=5)
-        if not changes:
-            await msg.reply("📭 Нет отключенных изменений в архиве.")
-            return
-
-        response = f"📁 Архив отключенных изменений (Страница {page}/{(total + 4) // 5}):\n"
-
-        for change in changes:
-            date_str = change['scheduled_time'].strftime("%d.%m.%Y %H:%M")
-            type_emoji = {
-                'title': '🏷️',
-                'avatar': '🖼️',
-                'description': '📝'
-            }.get(change['change_type'], '📌')
-            repeat_text = _get_repeat_text(change['repeat_type'])
-
-            # Обрезаем текст
-            display_value = change['new_value']
-            if len(display_value) > 40:
-                display_value = display_value[:37] + "..."
-
-            response += (f"{type_emoji} <b>ID: {change['id']}</b>\n"
-                         f"📅 {date_str} | {repeat_text}\n"
-                         f"📋 {display_value}\n")
-
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="🔄 Восстановить", callback_data=f"restore_{page}"),
-            InlineKeyboardButton(text="🗑️ Удалить навсегда", callback_data=f"delete_perm_{page}")
-        ]])
-
-        await msg.reply(response, parse_mode='HTML', reply_markup=keyboard)
-
-    except Exception as e:
-        await msg.reply("❌ Ошибка при получении архива.")
-        logger.error(f"Ошибка в view_archived_changes: {e}", exc_info=True)
-
-
-# Команда для проверки статуса сервиса
 #@auto_chat_router.message(F.text.regexp(r'^[!/.]статус изменений$'))
 async def check_service_status(msg: Message):
     """Проверяет статус сервиса автоматических изменений."""
     user_id = msg.from_user.id
 
-    if not await auto_check_AccessLevel_for_rang(user_id, msg.from_user.id, 40):
+    if not await auto_check_AccessLevel_for_rang(user_id, msg.chat.id, 40):
         return
 
     try:
@@ -1461,10 +1279,11 @@ async def check_service_status(msg: Message):
         else:
             response = (
                 f"📊 <b>Статус сервиса автоматических изменений:</b>\n"
-                f"🔄 Статус: {'✅ Запущен' if status['is_running'] else '⛔ Остановлен'}\n"
-                f"⏰ Интервал проверки: {status['check_interval']} сек\n"
-                f"📋 Задача проверки: {'✅ Работает' if status['check_task_running'] else '⛔ Не работает'}\n"
-                f"🤖 ID бота: {status['bot_id']}\n"
+                f"🔄 Статус: {'✅ Запущен' if status.get('is_running', False) else '⛔ Остановлен'}\n"
+                f"⏰ Интервал проверки: {status.get('check_interval', 'N/A')} сек\n"
+                f"📋 Задача проверки: {'✅ Работает' if status.get('check_task_running', False) else '⛔ Не работает'}\n"
+                f"🤖 ID бота: {status.get('bot_id', 'N/A')}\n"
+                f"🖼️ Лимит аватарок: 5 минут между изменениями\n"
                 f"<i>Для принудительной проверки используйте !проверить изменения</i>"
             )
 
@@ -1474,7 +1293,7 @@ async def check_service_status(msg: Message):
         logger.error(f"Ошибка в check_service_status: {e}", exc_info=True)
 
 
-#@auto_chat_router.message(F.text.regexp(r'^[!/.]проверить изменения$'))
+@auto_chat_router.message(F.text.regexp(r'^[!/.]проверить изменения$'))
 async def force_check_changes(msg: Message):
     """Принудительно запускает проверку изменений."""
     user_id = msg.from_user.id
@@ -1510,15 +1329,23 @@ async def test_change_application(msg: Message):
             await msg.reply("❌ Сервис не инициализирован")
             return
 
-        # Получаем информацию об изменении
         change = await get_change_by_id(change_id)
         if not change:
             await msg.reply(f"❌ Изменение с ID {change_id} не найдено")
             return
 
-        # Применяем изменение
+        # Для аватарки проверяем лимит
+        if change['change_type'] == 'avatar':
+            can_change, limit_message = await check_avatar_rate_limit(msg.chat.id)
+            if not can_change:
+                await msg.reply(f"⚠️ {limit_message}\nПрименение отложено до истечения лимита.")
+                return
+
         success = await service.apply_change_now(change_id)
         if success:
+            # Если успешно применили аватарку, обновляем время
+            if change['change_type'] == 'avatar':
+                await update_avatar_after_application(msg.chat.id)
             await msg.reply(f"✅ Изменение {change_id} успешно применено")
         else:
             await msg.reply(f"❌ Не удалось применить изменение {change_id}")
@@ -1531,22 +1358,20 @@ async def test_change_application(msg: Message):
 # Обработчики callback-запросов
 @auto_chat_router.callback_query(
     F.data.startswith(('titles_', 'avatars_', 'descriptions_', 'all_changes_',
-                       'delete_all_', 'stats', 'clear_all_', 'restore_', 'delete_perm_',
+                       'delete_all_', 'stats', 'clear_all_',
                        'view_titles_', 'view_avatars_', 'view_descriptions_')))
 @rate_limit_with_cleanup(limit=1)
 async def handle_pagination_callback(callback: CallbackQuery):
-
+    # Проверяем, что callback от того же пользователя
     if (not callback.message.reply_to_message or
             callback.from_user.id != callback.message.reply_to_message.from_user.id):
         random_text = get_random_text()
         await callback.answer(f"{random_text}", show_alert=True)
         return
 
-    """Обрабатывает callback-запросы для пагинации."""
-
-    if not await _check_chat_admin_callback(callback):
-        await callback.answer("У вас нет прав для этого действия.")
-        return
+    #if not await _check_chat_admin_callback(callback):
+     #   await callback.answer("❌ Недостаточно прав для выполнения действия", show_alert=True)
+      #  return
 
     try:
         data = callback.data
@@ -1561,32 +1386,32 @@ async def handle_pagination_callback(callback: CallbackQuery):
             page = int(data.split('_')[1])
             await _send_changes_page(callback, 'description', page)
         elif data.startswith('view_titles_'):
-            page = int(data.split('_')[2])
+            parts = data.split('_')
+            page = int(parts[2]) if len(parts) > 2 else 1
             await _send_changes_page(callback, 'title', page)
         elif data.startswith('view_avatars_'):
-            page = int(data.split('_')[2])
+            parts = data.split('_')
+            page = int(parts[2]) if len(parts) > 2 else 1
             await _send_changes_page(callback, 'avatar', page)
         elif data.startswith('view_descriptions_'):
-            page = int(data.split('_')[2])
+            parts = data.split('_')
+            page = int(parts[2]) if len(parts) > 2 else 1
             await _send_changes_page(callback, 'description', page)
         elif data.startswith('all_changes_'):
-            page = int(data.split('_')[2])
+            parts = data.split('_')
+            page = int(parts[2]) if len(parts) > 2 else 1
             await _send_all_changes_page(callback, page)
         elif data.startswith('delete_all_'):
-            date_str = data.split('_')[2].replace('_', '.')
-            await _delete_all_changes_on_date(callback, date_str)
+            parts = data.split('_')
+            if len(parts) >= 3:
+                date_str = parts[2].replace('_', '.')
+                await _delete_all_changes_on_date(callback, date_str)
         elif data == 'stats':
             await _show_stats_callback(callback)
         elif data == 'clear_all_confirm':
             await _confirm_clear_all(callback)
         elif data.startswith('clear_all_yes'):
             await _clear_all_changes(callback)
-        elif data.startswith('restore_'):
-            page = int(data.split('_')[1])
-            await _show_restore_options(callback, page)
-        elif data.startswith('delete_perm_'):
-            page = int(data.split('_')[2])
-            await _show_delete_permanent_options(callback, page)
 
         await callback.answer()
     except Exception as e:
@@ -1602,32 +1427,35 @@ async def _view_changes_by_type(msg: Message, change_type: str):
     if not await auto_check_AccessLevel_for_rang(msg.from_user.id, chat_id, 40):
         return
 
-    # Парсим номер страницы
     page = 1
     parts = msg.text.split()
-    if parts[-1].isdigit():
+    if len(parts) > 1 and parts[-1].isdigit():
         page = int(parts[-1])
 
     await _send_changes_page(msg, change_type, page)
 
 
-async def _send_changes_page(source, change_type: str, page: int = 1):
+async def _send_changes_page(source: Union[Message, CallbackQuery], change_type: str, page: int = 1):
     """Отправляет страницу с изменениями."""
-    chat_id = source.chat.id if isinstance(source, Message) else source.message.chat.id
+    if isinstance(source, Message):
+        chat_id = source.chat.id
+        reply_method = source.reply
+    else:
+        chat_id = source.message.chat.id
+        reply_method = source.message.edit_text
+
     limit = 5
 
-    # Получаем изменения
     changes, total = await get_changes_by_type(chat_id, change_type, page, limit)
 
     if not changes:
         text = "📭 Нет запланированных изменений этого типа."
         if isinstance(source, CallbackQuery):
-            await source.message.edit_text(text)
+            await reply_method(text)
         else:
-            await source.reply(text)
+            await reply_method(text)
         return
 
-    # Типы на русском
     type_names = {
         'title': '🏷️ Названия',
         'avatar': '🖼️ Аватарки',
@@ -1635,14 +1463,13 @@ async def _send_changes_page(source, change_type: str, page: int = 1):
     }
     type_name = type_names.get(change_type, change_type.capitalize())
 
-    # Формируем сообщение
-    response = f"{type_name} (Страница {page}/{(total + limit - 1) // limit}):\n"
+    total_pages = (total + limit - 1) // limit
+    response = f"{type_name} (Страница {page}/{total_pages}):\n"
 
     for i, change in enumerate(changes, start=(page - 1) * limit + 1):
         date_str = change['scheduled_time'].strftime("%d.%m.%Y %H:%M")
         repeat_text = _get_repeat_text(change['repeat_type'])
 
-        # Обрезаем длинный текст
         display_value = change['new_value']
         if len(display_value) > 60:
             display_value = display_value[:57] + "..."
@@ -1657,10 +1484,8 @@ async def _send_changes_page(source, change_type: str, page: int = 1):
 
         response += "\n"
 
-    # Создаем клавиатуру
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
     row = []
-    total_pages = (total + limit - 1) // limit
 
     if page > 1:
         row.append(InlineKeyboardButton(
@@ -1677,7 +1502,6 @@ async def _send_changes_page(source, change_type: str, page: int = 1):
     if row:
         keyboard.inline_keyboard.append(row)
 
-    # Кнопки действий
     action_row = [
         InlineKeyboardButton(
             text="🗑️ Удалить по ID",
@@ -1690,24 +1514,21 @@ async def _send_changes_page(source, change_type: str, page: int = 1):
     ]
     keyboard.inline_keyboard.append(action_row)
 
-    # Отправляем или редактируем сообщение
     if isinstance(source, CallbackQuery):
-        await source.message.edit_text(response, parse_mode='HTML', reply_markup=keyboard)
+        await reply_method(response, parse_mode='HTML', reply_markup=keyboard)
     else:
-        await source.reply(response, parse_mode='HTML', reply_markup=keyboard)
+        await reply_method(response, parse_mode='HTML', reply_markup=keyboard)
 
 
 async def _send_all_changes_page(callback: CallbackQuery, page: int):
     """Отправляет страницу со всеми изменениями через callback."""
     chat_id = callback.message.chat.id
 
-    # Получаем все изменения
     changes = await get_all_active_changes(chat_id)
     if not changes:
         await callback.message.edit_text("📭 Нет запланированных изменений для этого чата.")
         return
 
-    # Группируем по дате
     changes_by_date = {}
     for change in changes:
         date_key = change['scheduled_time'].strftime("%d.%m.%Y")
@@ -1715,11 +1536,9 @@ async def _send_all_changes_page(callback: CallbackQuery, page: int):
             changes_by_date[date_key] = []
         changes_by_date[date_key].append(change)
 
-    # Сортируем даты
     sorted_dates = sorted(changes_by_date.keys(),
                           key=lambda x: datetime.strptime(x, "%d.%m.%Y"))
 
-    # Пагинация по датам (3 даты на страницу)
     dates_per_page = 3
     total_pages = (len(sorted_dates) + dates_per_page - 1) // dates_per_page
     page = max(1, min(page, total_pages))
@@ -1727,7 +1546,6 @@ async def _send_all_changes_page(callback: CallbackQuery, page: int):
     end_idx = start_idx + dates_per_page
     current_dates = sorted_dates[start_idx:end_idx]
 
-    # Формируем сообщение
     response = f"📅 Все запланированные изменения (Страница {page}/{total_pages}):\n"
 
     for date_str in current_dates:
@@ -1742,7 +1560,6 @@ async def _send_all_changes_page(callback: CallbackQuery, page: int):
             }.get(change['change_type'], '📌')
             repeat_text = _get_repeat_text(change['repeat_type'])
 
-            # Обрезаем длинный текст для отображения
             display_value = change['new_value']
             if len(display_value) > 50:
                 display_value = display_value[:47] + "..."
@@ -1752,7 +1569,6 @@ async def _send_all_changes_page(callback: CallbackQuery, page: int):
                          f"  📋 {display_value}\n"
                          f"  🆔 ID: {change['id']}\n")
 
-    # Создаем клавиатуру пагинации
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
     row = []
 
@@ -1771,7 +1587,6 @@ async def _send_all_changes_page(callback: CallbackQuery, page: int):
     if row:
         keyboard.inline_keyboard.append(row)
 
-    # Добавляем кнопки для отдельных типов
     types_row = [
         InlineKeyboardButton(text="🏷️ Названия", callback_data="view_titles_1"),
         InlineKeyboardButton(text="🖼️ Аватарки", callback_data="view_avatars_1"),
@@ -1779,9 +1594,9 @@ async def _send_all_changes_page(callback: CallbackQuery, page: int):
     ]
     keyboard.inline_keyboard.append(types_row)
 
-    # Добавляем кнопку статистики
     keyboard.inline_keyboard.append([
-        InlineKeyboardButton(text="📊 Статистика", callback_data="stats")
+        InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
+        InlineKeyboardButton(text="🗑️ Очистить все", callback_data="clear_all_confirm")
     ])
 
     await callback.message.edit_text(response, parse_mode='HTML', reply_markup=keyboard)
@@ -1802,7 +1617,7 @@ async def _delete_all_changes_on_date(callback: CallbackQuery, date_str: str):
         # Удаляем каждое изменение
         deleted_count = 0
         for change in changes:
-            success = await delete_change(change['id'], archived_by=callback.from_user.id)
+            success = await delete_change(change['id'])
             if success:
                 deleted_count += 1
 
@@ -1819,49 +1634,30 @@ async def _show_stats_callback(callback: CallbackQuery):
     chat_id = callback.message.chat.id
 
     try:
-        # Получаем статистику
         stats = await get_statistics(chat_id)
-        if not stats:
+        if not stats or not stats.get('type_stats'):
             await callback.message.edit_text("📭 Нет активных запланированных изменений.")
             return
 
-        response = "📊 <b>Статистика изменений чата:</b>\n"
+        response = "📊 <b>Статистика изменений чата:</b>\n\n"
 
-        # Статистика по типам
         response += "📈 <b>По типам:</b>\n"
         type_names = {'title': '🏷️ Названия', 'avatar': '🖼️ Аватарки', 'description': '📝 Описания'}
 
         for type_stat in stats.get('type_stats', []):
             change_type = type_stat['change_type']
-            active = type_stat.get('active', 0)
-            inactive = type_stat.get('inactive', 0)
-            response += f"  {type_names.get(change_type, change_type)}: {active} активных"
-            if inactive > 0:
-                response += f", {inactive} неактивных"
-            response += "\n"
+            count = type_stat.get('count', 0)
+            response += f"  {type_names.get(change_type, change_type)}: {count}\n"
 
-        # Статистика по повторениям
         response += "\n🔄 <b>По повторению:</b>\n"
         for repeat_stat in stats.get('repeat_stats', []):
             repeat_name = _get_repeat_text(repeat_stat['repeat_type'])
             response += f"  {repeat_name}: {repeat_stat['count']}\n"
 
-        # Ближайшие изменения
         upcoming_count = stats.get('upcoming_count', 0)
         response += f"\n⏰ <b>Ближайшие изменения (24ч):</b> {upcoming_count}\n"
 
-        # Последние изменения
-        recent_changes = stats.get('recent_changes', [])
-        if recent_changes:
-            response += "\n📋 <b>Последние изменения:</b>\n"
-            for i, change in enumerate(recent_changes[:5], 1):
-                date_str = change['scheduled_time'].strftime("%d.%m.%Y %H:%M") if change.get(
-                    'scheduled_time') else "N/A"
-                type_emoji = {'title': '🏷️', 'avatar': '🖼️', 'description': '📝'}.get(change.get('change_type', ''), '📌')
-                response += f"  {i}. {type_emoji} {date_str}\n"
-
-        # Общее количество
-        total_active = sum(stat.get('active', 0) for stat in stats.get('type_stats', []))
+        total_active = sum(stat.get('count', 0) for stat in stats.get('type_stats', []))
         response += f"\n📊 <b>Всего активных:</b> {total_active} изменений"
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
@@ -1907,95 +1703,48 @@ async def _clear_all_changes(callback: CallbackQuery):
         logger.error(f"Ошибка в _clear_all_changes: {e}", exc_info=True)
 
 
-async def _show_restore_options(callback: CallbackQuery, page: int):
-    """Показывает опции восстановления."""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🔄 Восстановить все на странице",
-                                 callback_data=f"restore_page_{page}"),
-            InlineKeyboardButton(text="📋 Выбрать для восстановления",
-                                 callback_data=f"restore_select_{page}")
-        ],
-        [
-            InlineKeyboardButton(text="⬅️ Назад", callback_data=f"archiv_{page}")
-        ]
-    ])
-
-    await callback.message.edit_text(
-        "Выберите действие для восстановления отключенных изменений:",
-        reply_markup=keyboard
-    )
-
-
-async def _show_delete_permanent_options(callback: CallbackQuery, page: int):
-    """Показывает опции удаления навсегда."""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🗑️ Удалить все на странице",
-                                 callback_data=f"delete_page_{page}"),
-            InlineKeyboardButton(text="📋 Выбрать для удаления",
-                                 callback_data=f"delete_select_{page}")
-        ],
-        [
-            InlineKeyboardButton(text="⬅️ Назад", callback_data=f"archiv_{page}")
-        ]
-    ])
-
-    await callback.message.edit_text(
-        "⚠️ <b>Внимание: удаление навсегда нельзя отменить!</b>\n"
-        "Выберите действие:",
-        parse_mode='HTML',
-        reply_markup=keyboard
-    )
-
-
 # Помощь по командам
-@auto_chat_router.message(F.text.regexp(r'^[!/.]помощь изменения$'))
+#@auto_chat_router.message(Command("помощь_изменения"))
 async def show_help(msg: Message):
     """Показывает справку по командам изменений."""
     help_text = """
 🤖 <b>Автоматические изменения чата - Справка</b>
 
 <b>📝 Планирование названия:</b>
-• <code>+менять название ДД.ММ.ГГГГ ЧЧ:ММ тип</code> [новая строка] [текст названия]
-• <code>+сегодня название ЧЧ:ММ тип</code> [новая строка] [текст названия]
-• <code>+завтра название ЧЧ:ММ тип</code> [новая строка] [текст названия]
+• <code>+менять название [дата/время] [тип]</code>
+  [текст названия на новой строке]
 
 <b>📝 Планирование описания:</b>
-• <code>+описание ДД.ММ.ГГГГ ЧЧ:ММ тип</code> [новая строка] [текст описания]
-• <code>+сегодня описание ЧЧ:ММ тип</code> [новая строка] [текст описания]
-• <code>+завтра описание ЧЧ:ММ тип</code> [новая строка] [текст описания]
+• <code>+описание [дата/время] [тип]</code>
+  [текст описания на новой строке]
 
 <b>🖼️ Планирование аватарки:</b>
-• <b>С фото в сообщении:</b> <code>+аватарка [описание?] ДД.ММ.ГГГГ ЧЧ:ММ тип</code> + прикрепить фото
-• <b>С reply на фото:</b> Ответить на фото командой <code>+аватарка [описание?] ДД.ММ.ГГГГ ЧЧ:ММ тип</code>
-• <b>Быстро сегодня:</b> <code>+сегодня аватарка ЧЧ:ММ тип [описание]</code> + фото
-• <b>Быстро завтра:</b> <code>+завтра аватарка ЧЧ:ММ тип [описание]</code> + фото
+• <code>+аватарка [дата/время] [тип] [описание?]</code> + прикрепить фото
+• <code>+сегодня аватарка ЧЧ:ММ [тип] [описание?]</code> + фото
+• <code>+завтра аватарка ЧЧ:ММ [тип] [описание?]</code> + фото
 
-<b>📊 Просмотр:</b>
-• <code>!названия чата</code> - все названия
-• <code>!аватарки чата</code> - все аватарки
-• <code>!описания чата</code> - все описания
-• <code>!изменения чата</code> - все изменения
-• <code>!изменения на ДД.ММ.ГГГГ</code> - на дату
-• <code>!статистика изменений</code> - статистика
-• <code>!архив изменений</code> - отключенные изменения
-
-<b>⚙️ Управление:</b>
-• <code>!удалить название [ID]</code>
-• <code>!удалить аватарку [ID]</code>
-• <code>!удалить описание [ID]</code>
-• <code>!отключить изменение [ID]</code>
-• <code>!статус изменений</code> - статус сервиса
-• <code>!проверить изменения</code> - принудительная проверка
-• <code>!тест изменения [ID]</code> - принудительное применение
+<b>📊 Форматы даты/времени:</b>
+• <b>Число:</b> 25
+• <b>Число.месяц:</b> 25.12
+• <b>Полная дата:</b> 25.12.2024
+• <b>С временем:</b> 25.12 14:30 или 25.12.2024 14:30
+• <b>Относительные:</b> сегодня, завтра, через неделю, через месяц
 
 <b>🔄 Типы повторения:</b>
 • <b>Русские:</b> одноразово, ежедневно, еженедельно, ежемесячно, ежегодно
 • <b>English:</b> once, daily, weekly, monthly, yearly
 
-<b>📅 Формат даты:</b> ДД.ММ.ГГГГ (например: 25.12.2024)
-<b>⏰ Формат времени:</b> ЧЧ:ММ (например: 14:30)
+<b>⚙️ Управление:</b>
+• <code>!названия чата</code> - список названий
+• <code>!аватарки чата</code> - список аватарок
+• <code>!описания чата</code> - список описаний
+• <code>!изменения чата</code> - все изменения
+• <code>!статистика изменений</code> - статистика
+• <code>!удалить название [ID]</code> - удалить название
+• <code>!удалить аватарку [ID]</code> - удалить аватарку
+• <code>!удалить описание [ID]</code> - удалить описание
+
+⚠️ <b>Важно:</b> Аватарку можно менять не чаще 1 раза в 5 минут!
 """
 
     await msg.reply(help_text, parse_mode='HTML')
@@ -2010,14 +1759,15 @@ async def on_startup():
 
     for cfg in MultiBotConfig.BOTS:
         bot = get_bot_by_token(cfg["TOKEN"])
-
         if bot:
             await init_auto_chat_service(bot)
-            logger.info("Сервис автоматических изменений запущен")
+            logger.info("Сервис автоматических изменений запущен для бота")
 
 
 @auto_chat_router.shutdown()
 async def on_shutdown():
-    """Останавливает сервис при выключении."""
+    """Очищает кэш и останавливает сервис при выключении."""
+    _last_avatar_change.clear()
+    _avatar_lock.clear()
     await shutdown_auto_chat_service()
     logger.info("Сервис автоматических изменений остановлен")

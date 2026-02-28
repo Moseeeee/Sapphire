@@ -2,7 +2,6 @@ import re
 from datetime import timedelta, datetime
 import asyncio
 import math
-import logging
 
 from aiogram import Router, Bot, F
 from aiogram.types import (
@@ -10,7 +9,7 @@ from aiogram.types import (
     InlineKeyboardButton, InlineKeyboardMarkup, ChatMemberUpdated
 )
 
-from handlers.AgentsFeatures.payment.payment import check_user_access
+from handlers.sanor_commands.payment.payment import check_user_access
 from handlers.AdminsTools.ChatSettings.captcha.captchaDB import *
 from handlers.AdminsTools.CommandsModerations.bans.ban import perform_ban
 from handlers.AdminsTools.ChatSettings.captcha.captcha_generator import CaptchaGenerator
@@ -20,7 +19,7 @@ from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import get_random_text, rate_limit_with_cleanup
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 logger = logging.getLogger(__name__)
@@ -487,7 +486,6 @@ async def set_captcha_difficulty(message: Message):
 @captcha_router.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?капча лимит', re.IGNORECASE)))
 async def set_captcha_attempts(message: Message):
     if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 44):
-        await message.answer("❌ У вас недостаточно прав для этой команды.")
         return
     text = message.text.strip()
     if text and text[0] in '!./':

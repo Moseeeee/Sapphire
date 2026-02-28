@@ -4,6 +4,7 @@ import time
 import psutil
 from typing import Dict, Any, List
 from aiogram import Router, F, Bot
+from aiogram.filters import Command
 from aiogram.types import Message
 
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
@@ -328,6 +329,7 @@ async def _measure_single_bot_ping(bot: Bot) -> float:
 @server_stats_router.message(F.text.split("\n", 1)[0].lower() == "!актив бота")
 @server_stats_router.message(F.text.split("\n", 1)[0].lower() == ".актив бота")
 @server_stats_router.message(F.text.split("\n", 1)[0].lower() == "/актив бота")
+@server_stats_router.message(Command("bot_active_5_min"))
 async def cmd_bots_activity(message: Message):
 
     if message.from_user.id != sanor_ID:

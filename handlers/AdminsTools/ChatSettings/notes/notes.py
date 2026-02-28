@@ -4,19 +4,19 @@ import re
 from aiogram import Router, F, types
 from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.filters import Command
 
 from handlers.AdminsTools.ChatSettings.notes.notesDB import add_note, delete_note, get_note, get_all_notes, \
-    search_notes, get_note_by_name
+    search_notes, get_note_by_name, update_note_text, rename_note
 from handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovalsUtils import contains_links, \
     get_note_moderation_keyboard
 from handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovalsDB import get_pending_moderation_note, \
     add_pending_moderation_note
 from handlers.BotAutomaticWork.Gonfig.config import AGENT_CHAT_ID_CheckTextApprovals
 from handlers.BotAutomaticWork.AddChatsBot.link.chats_global_link import chat_global_link
+from handlers.BotAutomaticWork.universal_bot import bot
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 
 notes_router = Router()
 
@@ -53,16 +53,16 @@ def get_command_args(text: str, command: str) -> str:
     return text[len(command):].strip()
 
 
-def extract_note_identifier(text: str, prefixes: tuple = ('/заметка', '.заметка', '!заметка')) -> str:
-    """Извлечение идентификатора заметки из команды"""
-    text_lower = text.lower()
+def extract_note_identifier(text: str) -> str:
+    # Убираем все возможные префиксы в начале
+    prefixes = ["/заметка", ".заметка", "!заметка", "заметка"]
+
     for prefix in prefixes:
-        if text_lower.startswith(prefix):
-            # Берем часть после префикса
-            after_prefix = text[len(prefix):].strip()
-            # Берем только первую строку (до переноса строки)
-            first_line = after_prefix.split('\n', 1)[0].strip()
-            return first_line
+        if text.lower().startswith(prefix):
+            # Убираем префикс и лишние пробелы
+            identifier = text[len(prefix):].strip()
+            return identifier
+
     return ""
 
 
@@ -121,7 +121,7 @@ async def add_note_handler(message: Message):
                     f"<b>💬 Текст заметки:</b>\n{html_note_text}\n\n"
                     f"<b>Чат:</b> {chat_link}\n"
                     f"<b>Пользователь:</b> {user_link}",
-                    reply_markup=get_note_moderation_keyboard(chat_id, user_id, note_name),
+                    reply_markup=get_note_moderation_keyboard(chat_id, user_id, note_name, is_edit=False),
                     parse_mode='HTML',
                     disable_web_page_preview=True
                 )
@@ -144,7 +144,8 @@ async def add_note_handler(message: Message):
                     html_note_text,  # Сохраняем HTML-текст
                     message.message_id,
                     admin_message.message_id,
-                    user_id
+                    user_id,
+                    is_edit=False
                 )
 
             except Exception as e:
@@ -154,12 +155,12 @@ async def add_note_handler(message: Message):
 
         else:
             # Если ссылок нет - сразу сохраняем
-            result = await add_note(message.chat.id, note_name, html_note_text)  # Сохраняем HTML-текст
+            result = await add_note(message.chat.id, note_name, html_note_text)
 
             if result.get('success', False):
                 await message.reply(f"✅ Заметка «{note_name}» добавлена")
             else:
-                await message.reply("❌ Ошибка при добавлении заметки")
+                await message.reply(f"❌ Ошибка при добавлении заметки: {result.get('error', 'Неизвестная ошибка')}")
 
     except Exception as e:
         logger.error(f"Ошибка в add_note_handler: {e}", exc_info=True)
@@ -200,9 +201,154 @@ async def delete_note_handler(message: Message):
         await message.reply("❌ Произошла ошибка при удалении заметки")
 
 
+@notes_router.message(lambda m: m.text and m.text.lower().startswith("~заметка"))
+async def edit_note_content_handler(message: Message):
+    """Редактирование содержимого заметки: ~заметка название_или_номер\nновый_текст"""
+
+    if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 51):
+        return
+
+    try:
+        # Парсим аргументы
+        note_identifier, note_text = parse_note_args(message.text)
+
+        # Валидация
+        if not note_identifier:
+            await message.reply("❌ Укажите название или номер заметки для редактирования")
+            return
+
+        if not note_text:
+            await message.reply('⚠️ Укажите новый текст заметки после названия/номера, начиная с новой строки.')
+            return
+
+        # Проверяем существование заметки
+        current_note = await get_note(message.chat.id, note_identifier)
+        if not current_note:
+            await message.reply("❌ Заметка не найдена")
+            return
+
+        note_name = current_note['notes_name']
+
+        # Получаем HTML-текст
+        if message.html_text:
+            html_text = message.html_text
+            lines = html_text.split('\n', 1)
+            if len(lines) > 1:
+                html_note_text = lines[1].strip()
+            else:
+                html_note_text = ""
+        else:
+            html_note_text = message.text.split('\n', 1)[1].strip() if '\n' in message.text else ""
+
+        # Проверка на ссылки
+        if contains_links(html_note_text):
+            # Если есть ссылки - отправляем на модерацию
+            chat_id = message.chat.id
+            user_id = message.from_user.id
+
+            chat_link = await chat_global_link(chat_id)
+            user_link = await user_link_global(user_id)
+
+            try:
+                admin_message = await message.bot.send_message(
+                    AGENT_CHAT_ID_CheckTextApprovals,
+                    f"📝 <b>Редактирование заметки на проверку</b>\n"
+                    f"<b>Название:</b> {note_name}\n\n"
+                    f"<b>💬 Новый текст заметки:</b>\n{html_note_text}\n\n"
+                    f"<b>Чат:</b> {chat_link}\n"
+                    f"<b>Пользователь:</b> {user_link}",
+                    reply_markup=get_note_moderation_keyboard(chat_id, user_id, note_name, is_edit=True),
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+
+                await message.reply('⚠️ Изменения отправлены на проверку, ожидайте.')
+
+                # Сохраняем в БД модерации с is_edit=True
+                await add_pending_moderation_note(
+                    chat_id,
+                    note_name,
+                    html_note_text,
+                    message.message_id,
+                    admin_message.message_id,
+                    user_id,
+                    is_edit=True  # Важно!
+                )
+
+            except Exception as e:
+                await message.reply('❌ Ошибка при отправке на модерацию.')
+                logger.error(f"Ошибка при отправке на модерацию: {e}", exc_info=True)
+                return
+
+        else:
+            # Если ссылок нет - сразу обновляем
+            success = await update_note_text(message.chat.id, note_identifier, html_note_text)
+
+            if success:
+                await message.reply(f"✅ Заметка «{note_name}» обновлена")
+            else:
+                await message.reply("❌ Ошибка при обновлении заметки")
+
+    except Exception as e:
+        logger.error(f"Ошибка в edit_note_content_handler: {e}", exc_info=True)
+        await message.reply("❌ Произошла ошибка при редактировании заметки")
+
+
+@notes_router.message(lambda m: m.text and m.text.lower().startswith("~название заметки"))
+async def rename_note_handler(message: Message):
+    """Переименование заметки: ~название заметки старое_название/номер новое_название"""
+
+    if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 51):
+        return
+
+    try:
+        # Получаем аргументы
+        args = message.text.split(maxsplit=3)
+        if len(args) < 4:
+            await message.reply("❌ Формат команды: ~название заметки {старое_название/номер} {новое_название}")
+            return
+
+        old_identifier = args[2].strip()
+        new_name = args[3].strip()
+
+        # Валидация
+        if not new_name:
+            await message.reply("❌ Укажите новое название заметки")
+            return
+
+        if len(new_name) > 100:
+            await message.reply("❌ Название заметки не должно превышать 100 символов")
+            return
+
+        # Получаем текущую заметку
+        current_note = await get_note(message.chat.id, old_identifier)
+        if not current_note:
+            await message.reply("❌ Заметка не найдена")
+            return
+
+        # Проверяем, не существует ли уже заметка с таким названием
+        existing_note = await get_note_by_name(message.chat.id, new_name)
+        if existing_note and existing_note['notes_name'] != current_note['notes_name']:
+            await message.reply("❌ Заметка с таким названием уже существует")
+            return
+
+        # Переименовываем
+        success = await rename_note(message.chat.id, old_identifier, new_name)
+
+        if success:
+            await message.reply(f"✅ Заметка «{current_note['notes_name']}» переименована в «{new_name}»")
+        else:
+            await message.reply("❌ Ошибка при переименовании заметки")
+
+    except Exception as e:
+        logger.error(f"Ошибка в rename_note_handler: {e}", exc_info=True)
+        await message.reply("❌ Произошла ошибка при переименовании заметки")
+
+
 @notes_router.message(lambda m: m.text and m.text.lower().startswith("/заметка"))
 @notes_router.message(lambda m: m.text and m.text.lower().startswith(".заметка"))
 @notes_router.message(lambda m: m.text and m.text.lower().startswith("!заметка"))
+@notes_router.message(lambda m: m.text and m.text.lower().startswith("заметка"))
 async def show_note_handler(message: Message):
     if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 52):
         return
@@ -226,9 +372,20 @@ async def show_note_handler(message: Message):
 
             response = (f"📝 Заметка «{note['notes_name']}»\n\n"
                         f"{note_text}")
-            await message.reply(response,
-                                parse_mode=parse_mode,
-                                disable_web_page_preview=True)
+
+            # Определяем, на какое сообщение отвечать
+            reply_to_message_id = None
+            if message.reply_to_message:
+                # Если команда была отправлена в ответ на другое сообщение
+                reply_to_message_id = message.reply_to_message.message_id
+
+            await bot.send_message(
+                chat_id=message.chat.id,
+                text=response,
+                parse_mode=parse_mode,
+                disable_web_page_preview=True,
+                reply_to_message_id=reply_to_message_id  # Передаем ID сообщения для ответа
+            )
         else:
             await message.reply("❌ Заметка не найдена")
 
@@ -242,6 +399,7 @@ NOTES_PER_PAGE = 10
 
 
 @notes_router.message(F.text.regexp(re.compile(r'^[!/.]заметки(\s|$)', re.IGNORECASE)))
+@notes_router.message(lambda m: m.text and m.text.lower().startswith("заметки"))
 async def list_notes_handler(message: Message):
     if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 52):
         return
@@ -253,6 +411,7 @@ async def list_notes_handler(message: Message):
     except Exception as e:
         logger.error(f"Ошибка в list_notes_handler: {e}", exc_info=True)
         await message.reply("❌ Произошла ошибка при получении списка заметок")
+
 
 
 async def show_notes_page(message: Message, page: int, search_term: str = None, edit_message: bool = False):
@@ -334,7 +493,7 @@ def create_pagination_keyboard(current_page: int, total_pages: int, search_term:
     return builder.as_markup()
 
 
-#@notes_router.message(lambda m: m.text and m.text.lower().startswith("поиск заметки"))
+# @notes_router.message(lambda m: m.text and m.text.lower().startswith("поиск заметки"))
 async def search_notes_handler(message: Message):
     """Поиск заметок: поиск заметки текст_для_поиска"""
     try:

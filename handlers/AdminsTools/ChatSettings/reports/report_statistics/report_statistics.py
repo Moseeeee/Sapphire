@@ -1,7 +1,7 @@
 # report_handlers.py
 import logging
 
-from aiogram import Router, types, F
+from aiogram import Router, types
 from aiogram.filters import Command
 
 from handlers.AdminsTools.ChatSettings.reports.report_statistics.report_statisticsDB import get_active_user_ids_in_chat, \
@@ -9,7 +9,8 @@ from handlers.AdminsTools.ChatSettings.reports.report_statistics.report_statisti
 from handlers.AdminsTools.ChatSettings.reports.reportsDB import check_reports_chats_db
 from handlers.BotAutomaticWork.AddChatsBot.link.chats_global_link import chat_global_link
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global, \
+    user_link_with_pseudonym
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ async def show_moderation_stats(message: types.Message):
 
     result_text = "📊 <b>Статистика модерации (активные участники)</b>\n\n"
     for i, (user_id, day, week, month, year, total) in enumerate(stats, 1):
-        user_link = await user_link_global(user_id)
+        user_link = await user_link_with_pseudonym(user_id, chat_id)
         result_text += f"{i}. {user_link}: {day} | {week} | {month} | {year} | {total}\n\n"
 
     await message.answer(result_text, parse_mode='HTML', disable_web_page_preview=True)
@@ -93,7 +94,7 @@ async def show_all_moderation_stats(message: types.Message):
 
     result_text = "📊 <b>Статистика модерации (все участники)</b>\n\n"
     for i, (user_id, day, week, month, year, total) in enumerate(stats, 1):
-        user_link = await user_link_global(user_id)
+        user_link = await user_link_with_pseudonym(user_id, chat_id)
         result_text += f"{i}. {user_link}: {day} | {week} | {month} | {year} | {total}\n\n"
 
     await message.answer(result_text, parse_mode='HTML', disable_web_page_preview=True)

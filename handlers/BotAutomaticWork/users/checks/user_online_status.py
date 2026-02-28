@@ -18,13 +18,13 @@ async def get_user_status(user_id):
     """
     try:
         if user_id is None:
-            return '😴'
+            return '(😴 оффлайн)'
 
         user_id = int(user_id)
         last_activity_str = await get_user_activity(user_id)
 
         if not last_activity_str:
-            return '😴'
+            return '(😴 оффлайн)'
 
         # Если это строка, преобразуем в datetime
         if isinstance(last_activity_str, str):
@@ -41,11 +41,11 @@ async def get_user_status(user_id):
         time_diff = current_time - last_activity
 
         if time_diff <= timedelta(minutes=2):
-            return '🔥'  # Онлайн
+            return '(🔥 онлайн)'  # Онлайн
         elif time_diff <= timedelta(minutes=15):
-            return '🥱'  # Неактивен
+            return '(🥱 некоторое время неактивен)'  # Неактивен
         else:
-            return '😴'  # Оффлайн
+            return '(😴 оффлайн)'  # Оффлайн
 
     except (ValueError, TypeError) as e:
         logger.error(f"Ошибка при обработке времени для пользователя {user_id}: {e}")

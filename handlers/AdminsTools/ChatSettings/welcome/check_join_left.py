@@ -22,7 +22,7 @@ import pytz
 from handlers.AdminsTools.CommandsModerations.bans.ban import perform_ban
 from handlers.AgentsFeatures.AntiSpam.AntiSpamDB import check_anti_spam
 from handlers.BotAutomaticWork.users.GenderUtils import g
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 from handlers.BotAutomaticWork.universal_bot import bot
 
@@ -105,15 +105,16 @@ async def handle_join(event: ChatMemberUpdated):
 
         # Приветствие
         welcome_text = await check_welcome_text(chat_id)
+        tag_link = f'<a href="tg://user?id={user_id}">\u200e</a>'
 
         if welcome_text:
             # Проверяем, содержит ли текст приветствия {имя}
             if '{имя}' not in welcome_text:
                 # Если {имя} нет, добавляем user_link в начало
-                send_welcome_text = f"{user_link}\n{welcome_text}"
+                send_welcome_text = f"{user_link}{tag_link}\n{welcome_text}"
             else:
                 # Если {имя} есть, заменяем его на user_link
-                send_welcome_text = welcome_text.replace('{имя}', user_link)
+                send_welcome_text = welcome_text.replace('{имя}', f'{user_link}{tag_link}')
 
             if captcha_enabled:
                 send_welcome_text += "\n\n⚠️ <b>В чате установлена капча, пройдите её чтобы общаться в чате.</b>"

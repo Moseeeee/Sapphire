@@ -15,7 +15,7 @@ from handlers.BotAutomaticWork.AddChatsBot.link.chats_global_link import chat_gl
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovalsDB import get_pending_moderation, add_pending_moderation
 from handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovalsUtils import contains_links, get_moderation_keyboard
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.BotAutomaticWork.universal_bot import bot
 
 rul = Router()
@@ -141,6 +141,7 @@ async def del_rules_text(msg: Message):
 
 
 @rul.message(lambda m: m.text and m.text.lower().startswith(('.правила',
+                                                             'правила',
                                                              '!правила',
                                                              '/правила')))
 @rul.message(Command("rules"))
@@ -154,18 +155,34 @@ async def rules_text(msg: Message):
         if not await auto_check_AccessLevel_for_rang(msg.from_user.id, chat_id, 48):
             return
 
-
         rules_text = await check_rules_text(chat_id)
 
-        if rules_text:
-            await bot.send_message(chat_id=chat_id, text=f'💬 <b>Правила чата:</b>\n{rules_text}',
-                                   parse_mode='HTML', disable_web_page_preview=True)
-        else:
-            await bot.send_message(chat_id=chat_id, text='❌ правила чата не установлены')
+        if not rules_text:
+            await bot.send_message(chat_id=chat_id, text='❌ Правила чата не установлены')
             return
+
+        rules_message = f'{rules_text}'
+
+        # Проверяем, была ли команда отправлена в ответ на сообщение
+        if msg.reply_to_message:
+            # Отвечаем тому, кому ответили
+            await bot.send_message(
+                chat_id=chat_id,
+                text=rules_message,
+                reply_to_message_id=msg.reply_to_message.message_id,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+        else:
+            # Отвечаем на текущее сообщение
+            await msg.reply(
+                rules_message,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+
     except Exception as e:
         await msg.reply(f'<b>Произошла ошибка:</b>\n\n{e}', parse_mode='HTML', disable_web_page_preview=True)
         logger.error(e, exc_info=True)
-
 
 

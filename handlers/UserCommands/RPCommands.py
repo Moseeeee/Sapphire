@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import html
 from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import Enum
@@ -13,8 +14,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 from handlers.BotAutomaticWork.users.GenderUtils import g
+from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_with_pseudonym
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_with_pseudonym
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
 # Настройка логирования
@@ -28,7 +30,7 @@ MAX_COMMENT_LENGTH = 256
 MAX_CLARIFICATION_LENGTH = 100
 COMMAND_PREFIXES = ('!', '.', '/')
 CACHE_CLEANUP_INTERVAL = 3600  # 1 час в секундах
-CACHE_MAX_AGE = 7200  # 2 часа в секундах (максимальное время жизни кэша)
+CACHE_MAX_AGE = 7200  # 2 часа в секундах
 
 
 class AgeRating(Enum):
@@ -53,55 +55,250 @@ class RPCommand:
         return re.sub(r"g\('([^']+)'\)", lambda m: g(m.group(1), gender), self.action_template)
 
 
-# Словарь всех RP-команд
 RP_COMMANDS_DATA = {
-    # Физические действия
-    'пнуть': {"emoji": "👢", "action": "пну'ул'", "rating": AgeRating.ZERO_PLUS.value},
+    # === ФИЗИЧЕСКИЕ ДЕЙСТВИЯ (0+) ===
+    'пнуть': {"emoji": "👢", "action": "пнg('ул')", "rating": AgeRating.ZERO_PLUS.value},
     'кик': {"emoji": "👢", "action": "пнg('ул')", "rating": AgeRating.ZERO_PLUS.value},
-    'ударить': {"emoji": "👊", "action": "ударg('ил')", "rating": AgeRating.THIRTEEN_PLUS.value},
-    'шлепнуть': {"emoji": "👋", "action": "шлёпнg('ул')", "rating": AgeRating.THIRTEEN_PLUS.value},
     'толкнуть': {"emoji": "🤜", "action": "толкнg('ул')", "rating": AgeRating.ZERO_PLUS.value},
+    'дать пять': {"emoji": "✋", "action": "даg('ал') пять", "rating": AgeRating.ZERO_PLUS.value},
+    'помахать': {"emoji": "👋", "action": "помахg('ал')", "rating": AgeRating.ZERO_PLUS.value},
+    'погрозить пальцем': {"emoji": "☝️", "action": "погрозg('ил') пальцем", "rating": AgeRating.ZERO_PLUS.value},
+    'показать язычок': {"emoji": "😛", "action": "показg('ал') язычок", "rating": AgeRating.ZERO_PLUS.value},
+    'покрутить в воздухе': {"emoji": "🌀", "action": "покрутg('ил') в воздухе", "rating": AgeRating.ZERO_PLUS.value},
+    'предложить руку': {"emoji": "🤝", "action": "предложg('ил') руку", "rating": AgeRating.ZERO_PLUS.value},
+    'погладить по голове': {"emoji": "🫶", "action": "погладg('ил') по голове", "rating": AgeRating.ZERO_PLUS.value},
+    'пощекотать подбородок': {"emoji": "😏", "action": "пощекотg('ал') подбородок", "rating": AgeRating.ZERO_PLUS.value},
+    'пожелать спокойной ночи': {"emoji": "🌙", "action": "пожелg('ал') спокойной ночи", "rating": AgeRating.ZERO_PLUS.value},
+    'пожелать удачи': {"emoji": "🍀", "action": "пожелg('ал') удачи", "rating": AgeRating.ZERO_PLUS.value},
+    'показать звезду': {"emoji": "🌟", "action": "показg('ал') звезду", "rating": AgeRating.ZERO_PLUS.value},
+    'сделать комплимент': {"emoji": "✨", "action": "сделg('ал') комплимент", "rating": AgeRating.ZERO_PLUS.value},
+    'поднять на руки': {"emoji": "🫶", "action": "поднg('ял') на руки", "rating": AgeRating.ZERO_PLUS.value},
+    'бросить в снег': {"emoji": "❄️", "action": "бросg('ил') в снег", "rating": AgeRating.ZERO_PLUS.value},
+    'подбросить вверх': {"emoji": "🤸", "action": "подбросg('ил') вверх", "rating": AgeRating.ZERO_PLUS.value},
+    'покрутить за руку': {"emoji": "🕺", "action": "покрутg('ил') за руку", "rating": AgeRating.ZERO_PLUS.value},
+    'пощекотать живот': {"emoji": "🤣", "action": "пощекотg('ал') живот", "rating": AgeRating.ZERO_PLUS.value},
+    'слегка толкнуть плечом': {"emoji": "🤏", "action": "слегка толкнg('ул') плечом", "rating": AgeRating.ZERO_PLUS.value},
+
+    # === ЛАСКОВЫЕ ДЕЙСТВИЯ (0+) ===
     'погладить': {"emoji": "🤗", "action": "погладg('ил')", "rating": AgeRating.ZERO_PLUS.value},
-    'укусить': {"emoji": "🦷", "action": "укусg('ил')", "rating": AgeRating.THIRTEEN_PLUS.value},
-    'пощечина': {"emoji": "😮", "action": "даg('ал') пощечину", "rating": AgeRating.THIRTEEN_PLUS.value},
-    'дать_пощёчину': {"emoji": "😮", "action": "даg('ал') пощечину", "rating": AgeRating.THIRTEEN_PLUS.value},
-
-    # Ласковые действия
     'обнять': {"emoji": "🫂", "action": "обнg('ял')", "rating": AgeRating.ZERO_PLUS.value},
-    'поцеловать': {"emoji": "💋", "action": "поцеловg('ал')", "rating": AgeRating.THIRTEEN_PLUS.value},
     'обрыгать': {"emoji": "🤢", "action": "обрыгg('ал')", "rating": AgeRating.ZERO_PLUS.value},
-    'приласкать': {"emoji": "🥰", "action": "приласкg('ал')", "rating": AgeRating.THIRTEEN_PLUS.value},
     'понюхать': {"emoji": "👃", "action": "понюхg('ал')", "rating": AgeRating.ZERO_PLUS.value},
-    'посадить_на_ручки': {"emoji": "👑", "action": "посадg('ил') на ручки", "rating": AgeRating.ZERO_PLUS.value},
+    'посадить на ручки': {"emoji": "👑", "action": "посадg('ил') на ручки", "rating": AgeRating.ZERO_PLUS.value},
     'покормить': {"emoji": "🍕", "action": "покормg('ил')", "rating": AgeRating.ZERO_PLUS.value},
-    'согреть': {"emoji": "🔥", "action": "согреg('л')", "rating": AgeRating.ZERO_PLUS.value},
+    'согреть': {"emoji": "🔥", "action": "согреg('л')", "rating": AgeRating.ZERO_PLUS.value},  # окончание 1 буква, но 'л' - исключение
 
-    # Весёлые действия
+    # === ВЕСЁЛЫЕ ДЕЙСТВИЯ (0+) ===
     'подмигнуть': {"emoji": "😉", "action": "подмигнg('ул')", "rating": AgeRating.ZERO_PLUS.value},
     'пощекотать': {"emoji": "😆", "action": "пощекотg('ал')", "rating": AgeRating.ZERO_PLUS.value},
-    'испугать': {"emoji": "😱", "action": "испугаg('л')", "rating": AgeRating.ZERO_PLUS.value},
-    'пожать_руку': {"emoji": "🤝", "action": "пожg('ал') руку", "rating": AgeRating.ZERO_PLUS.value},
-    'подставить_щёку': {"emoji": "😊", "action": "подставg('ил') щёку", "rating": AgeRating.ZERO_PLUS.value},
+    'испугать': {"emoji": "😱", "action": "испугg('ал')", "rating": AgeRating.ZERO_PLUS.value},
+    'пожать руку': {"emoji": "🤝", "action": "пожg('ал') руку", "rating": AgeRating.ZERO_PLUS.value},
+    'подставить щёку': {"emoji": "😊", "action": "подставg('ил') щёку", "rating": AgeRating.ZERO_PLUS.value},
 
-    # Драматические действия
-    'предать': {"emoji": "🗡️", "action": "предаg('л')", "rating": AgeRating.THIRTEEN_PLUS.value},
+    # === ДРАМАТИЧЕСКИЕ ДЕЙСТВИЯ (0+) ===
     'простить': {"emoji": "🤍", "action": "простg('ил')", "rating": AgeRating.ZERO_PLUS.value},
-    'спасти': {"emoji": "🛡️", "action": "спасg('ла')", "rating": AgeRating.ZERO_PLUS.value},
+    'спасти': {"emoji": "🛡️", "action": "спg('ас')", "rating": AgeRating.ZERO_PLUS.value},  # окончание 2 буквы 'ас'
     'вылечить': {"emoji": "💊", "action": "вылечg('ил')", "rating": AgeRating.ZERO_PLUS.value},
-    'пленить': {"emoji": "🦊", "action": "пленg('ил')", "rating": AgeRating.THIRTEEN_PLUS.value},
 
-    # Еда/напитки
+    # === ЕДА / НАПИТКИ (0+) ===
     'напоить': {"emoji": "🍵", "action": "напоg('ил')", "rating": AgeRating.ZERO_PLUS.value},
     'угостить': {"emoji": "🍰", "action": "угостg('ил')", "rating": AgeRating.ZERO_PLUS.value},
-    'угостить_чаем': {"emoji": "☕", "action": "угостg('ил') чаем", "rating": AgeRating.ZERO_PLUS.value},
+    'угостить чаем': {"emoji": "☕", "action": "угостg('ил') чаем", "rating": AgeRating.ZERO_PLUS.value},
 
-    # Специальные
+    # === СПЕЦИАЛЬНЫЕ (0+) ===
     'похвалить': {"emoji": "⭐", "action": "похвалg('ил')", "rating": AgeRating.ZERO_PLUS.value},
     'поблагодарить': {"emoji": "🙏", "action": "поблагодарg('ил')", "rating": AgeRating.ZERO_PLUS.value},
     'поздравить': {"emoji": "🎉", "action": "поздравg('ил')", "rating": AgeRating.ZERO_PLUS.value},
-    'пригласить_на_свидание': {"emoji": "💌", "action": "пригласg('ил') на свидание",
-                               "rating": AgeRating.THIRTEEN_PLUS.value},
-    'сделать_предложение': {"emoji": "💍", "action": "сделg('ал') предложение", "rating": AgeRating.THIRTEEN_PLUS.value},
+
+    # === ЭМОЦИИ И ВЫРАЖЕНИЯ ЛИЦА (0+) ===
+    'засмеяться': {"emoji": "😂", "action": "засмеяg('лся')", "rating": AgeRating.ZERO_PLUS.value},  # 3 буквы 'лся' - исключение
+    'заплакать': {"emoji": "😢", "action": "заплакg('ал')", "rating": AgeRating.ZERO_PLUS.value},
+    'вздохнуть': {"emoji": "😮‍💨", "action": "вздохнg('ул')", "rating": AgeRating.ZERO_PLUS.value},
+    'закатить глаза': {"emoji": "🙄", "action": "закатg('ил') глаза", "rating": AgeRating.ZERO_PLUS.value},
+    'нахмуриться': {"emoji": "😠", "action": "нахмуриg('лся')", "rating": AgeRating.ZERO_PLUS.value},  # 3 буквы 'лся' - исключение
+    'улыбнуться': {"emoji": "🙂", "action": "улыбнуg('лся')", "rating": AgeRating.ZERO_PLUS.value},  # 3 буквы 'лся' - исключение
+    'сделать сердечко руками': {"emoji": "🫶", "action": "сделg('ал') сердечко руками", "rating": AgeRating.ZERO_PLUS.value},
+    'покраснеть': {"emoji": "😳", "action": "покраснg('ел')", "rating": AgeRating.ZERO_PLUS.value},
+    'посмотреть снизу вверх': {"emoji": "🥺", "action": "посмотрg('ел') снизу вверх", "rating": AgeRating.ZERO_PLUS.value},
+
+    # === ИГРОВЫЕ / ШУТЛИВЫЕ (0+) ===
+    'притвориться мертвым': {"emoji": "💀", "action": "притвориg('лся') мёртвым", "rating": AgeRating.ZERO_PLUS.value},  # 3 буквы 'лся' - исключение
+    'подмигнуть дважды': {"emoji": "😉", "action": "подмигнg('ул') дважды", "rating": AgeRating.ZERO_PLUS.value},
+    'сыграть в прятки': {"emoji": "🙈", "action": "сыгрg('ал') в прятки", "rating": AgeRating.ZERO_PLUS.value},
+    'показать фокус': {"emoji": "🎩", "action": "показg('ал') фокус", "rating": AgeRating.ZERO_PLUS.value},
+    'сыграть на воображаемой скрипке': {"emoji": "🎻", "action": "сыгрg('ал') на воображаемой скрипке", "rating": AgeRating.ZERO_PLUS.value},
+    'изобразить призрака': {"emoji": "👻", "action": "изобразg('ил') призрака", "rating": AgeRating.ZERO_PLUS.value},
+    'притвориться спящим': {"emoji": "😴", "action": "притвориg('лся') спящим", "rating": AgeRating.ZERO_PLUS.value},  # 3 буквы 'лся' - исключение
+
+    # === ПОДДЕРЖКА И ЗАБОТА (0+) ===
+    'спрятать': {"emoji": "🙈", "action": "спрятg('ал')", "rating": AgeRating.ZERO_PLUS.value},
+    'накинуть пальто': {"emoji": "🧥", "action": "накинg('ул') пальто", "rating": AgeRating.ZERO_PLUS.value},
+    'успокоить': {"emoji": "🕊️", "action": "успокоg('ил')", "rating": AgeRating.ZERO_PLUS.value},
+    'ободрить': {"emoji": "💪", "action": "ободрg('ил')", "rating": AgeRating.ZERO_PLUS.value},
+    'прикрыть одеялом': {"emoji": "🛏️", "action": "прикрg('ыл') одеялом", "rating": AgeRating.ZERO_PLUS.value},
+    'дать плед': {"emoji": "🧣", "action": "дg('ал') плед", "rating": AgeRating.ZERO_PLUS.value},
+    'предложить чай': {"emoji": "☕", "action": "предложg('ил') чай", "rating": AgeRating.ZERO_PLUS.value},
+
+    # === ПРИРОДНЫЕ / АТМОСФЕРНЫЕ (0+) ===
+    'показать радугу': {"emoji": "🌈", "action": "показg('ал') радугу", "rating": AgeRating.ZERO_PLUS.value},
+    'собрать листочки': {"emoji": "🍂", "action": "собрg('ал') листочки", "rating": AgeRating.ZERO_PLUS.value},
+    'поймать снежинку': {"emoji": "❄️", "action": "поймg('ал') снежинку", "rating": AgeRating.ZERO_PLUS.value},
+    'выпустить бабочку': {"emoji": "🦋", "action": "выпустg('ил') бабочку", "rating": AgeRating.ZERO_PLUS.value},
+    'посадить цветок': {"emoji": "🌱", "action": "посадg('ил') цветок", "rating": AgeRating.ZERO_PLUS.value},
+
+    # === АБСТРАКТНЫЕ / СИМВОЛИЧЕСКИЕ (0+) ===
+    'передать мысль': {"emoji": "💭", "action": "передg('ал') мысль", "rating": AgeRating.ZERO_PLUS.value},
+    'нарисовать в воздухе сердце': {"emoji": "❤️", "action": "нарисовg('ал') в воздухе сердце", "rating": AgeRating.ZERO_PLUS.value},
+    'бросить монетку': {"emoji": "🪙", "action": "бросg('ил') монетку", "rating": AgeRating.ZERO_PLUS.value},
+    'зажечь свечу': {"emoji": "🕯️", "action": "зажg('ёг') свечу", "rating": AgeRating.ZERO_PLUS.value},
+    'открыть дверь в будущее': {"emoji": "🚪", "action": "открg('ыл') дверь в будущее", "rating": AgeRating.ZERO_PLUS.value},
+
+    # === ТЕАТРАЛЬНЫЕ / ДРАМАТИЧНЫЕ (13+) ===
+    'ударить': {"emoji": "👊", "action": "ударg('ил')", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'шлепнуть': {"emoji": "👋", "action": "шлёпнg('ул')", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'укусить': {"emoji": "🦷", "action": "укусg('ил')", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'пощечина': {"emoji": "😮", "action": "даg('ал') пощечину", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'дать пощёчину': {"emoji": "😮", "action": "даg('ал') пощечину", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'поцеловать': {"emoji": "💋", "action": "поцеловg('ал')", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'приласкать': {"emoji": "🥰", "action": "приласкg('ал')", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'предать': {"emoji": "🗡️", "action": "предg('ал')", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'пленить': {"emoji": "🦊", "action": "пленg('ил')", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'пригласить на свидание': {"emoji": "💌", "action": "пригласg('ил') на свидание", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'сделать предложение': {"emoji": "💍", "action": "сделg('ал') предложение", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'облизать': {"emoji": "👅", "action": "облизнg('ул')", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'прижаться': {"emoji": "💞", "action": "прижаg('лся')", "rating": AgeRating.THIRTEEN_PLUS.value},  # 3 буквы 'лся' - исключение
+    'шепнуть на ухо': {"emoji": "👂", "action": "шепнg('ул') на ухо", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'прижать к стене': {"emoji": "🧱", "action": "прижg('ал') к стене", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'обнять сзади': {"emoji": "🫂", "action": "обнg('ял') сзади", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'пощупать': {"emoji": "👀", "action": "пощупg('ал')", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'прижать к груди': {"emoji": "💞", "action": "прижg('ал') к груди", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'обнять за талию': {"emoji": "🫂", "action": "обнg('ял') за талию", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'провести рукой по волосам': {"emoji": "💆", "action": "провg('ёл') рукой по волосам", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'раскрыть тайну': {"emoji": "🤫", "action": "раскрg('ыл') тайну", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'упасть на колени': {"emoji": "🥹", "action": "упg('ал') на колени", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'произнести монолог': {"emoji": "🎭", "action": "произнg('ёс') монолог", "rating": AgeRating.THIRTEEN_PLUS.value},
+    'взорваться эмоциями': {"emoji": "💥", "action": "взорваg('лся') эмоциями", "rating": AgeRating.THIRTEEN_PLUS.value},  # 3 буквы 'лся' - исключение
+    'поцеловать в лоб': {"emoji": "💋", "action": "поцеловg('ал') в лоб", "rating": AgeRating.ZERO_PLUS.value},
+    'поцеловать в щёку': {"emoji": "💋", "action": "поцеловg('ал') в щёку", "rating": AgeRating.ZERO_PLUS.value},
+    'поцеловать в нос': {"emoji": "👃", "action": "поцеловg('ал') в нос", "rating": AgeRating.ZERO_PLUS.value},
+
+    # === ЖЁСТКОЕ НАСИЛИЕ (18+) ===
+    'избить': {"emoji": "💢", "action": "избg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'задушить': {"emoji": "🫁", "action": "задушg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'пытать': {"emoji": "🔪", "action": "пытg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'изнасиловать': {"emoji": "⛓️", "action": "изнасиловg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'разорвать': {"emoji": "💔", "action": "разорвg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'растерзать': {"emoji": "🧸", "action": "растерзg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'перерезать горло': {"emoji": "🩸", "action": "перерезg('ал') горло", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выколоть глаза': {"emoji": "👁️", "action": "выколg('ол') глаза", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'сломать кости': {"emoji": "🦴", "action": "сломg('ал') кости", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отрезать руку': {"emoji": "✂️", "action": "отрезg('ал') руку", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'привязать к стулу': {"emoji": "🪑", "action": "привязg('ал') к стулу", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'заклеймить': {"emoji": "🔥", "action": "заклеймg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'изуродовать': {"emoji": "🧟", "action": "изуродовg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'заковать в цепи': {"emoji": "⛓️", "action": "заковg('ал') в цепи", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'бросить в яму': {"emoji": "🕳️", "action": "бросg('ил') в яму", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'залить кислотой': {"emoji": "🧪", "action": "залg('ил') кислотой", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'сжечь заживо': {"emoji": "🔥", "action": "сжёg('г') заживо", "rating": AgeRating.EIGHTEEN_PLUS.value},  # окончание 1 буква 'г' - исключение
+    'утопить': {"emoji": "💧", "action": "утопg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'повесить': {"emoji": "🪢", "action": "повесg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'распять': {"emoji": "✝️", "action": "распg('ял')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'четвертовать': {"emoji": "🪓", "action": "четвертовg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отрубить голову': {"emoji": "⚔️", "action": "отрубg('ил') голову", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'вырвать сердце': {"emoji": "❤️‍🔥", "action": "вырвg('ал') сердце", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'содрать кожу': {"emoji": "🧻", "action": "содрg('ал') кожу", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'ослепить': {"emoji": "🕶️", "action": "ослепg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'обезглавить': {"emoji": "🗡️", "action": "обезглавg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'раздавить': {"emoji": "🐍", "action": "раздавg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'заткнуть рот': {"emoji": "🤐", "action": "заткнg('ул') рот", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'закопать заживо': {"emoji": "⚰️", "action": "закопg('ал') заживо", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выпустить кишки': {"emoji": "🪱", "action": "выпустg('ил') кишки", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'переломать ноги': {"emoji": "🦵", "action": "переломg('ал') ноги", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'сломать позвоночник': {"emoji": "⚡", "action": "сломg('ал') позвоночник", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'разбить голову': {"emoji": "💥", "action": "разбg('ил') голову", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выбить зубы': {"emoji": "😁", "action": "выбg('ил') зубы", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'проломить череп': {"emoji": "🧠", "action": "проломg('ил') череп", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'замуровать': {"emoji": "🧱", "action": "замуровg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'распороть живот': {"emoji": "🪡", "action": "распорg('ол') живот", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выжечь глаза': {"emoji": "🔥", "action": "выжg('ёг') глаза", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отрезать уши': {"emoji": "👂", "action": "отрезg('ал') уши", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'размозжить голову': {"emoji": "🔨", "action": "размозжg('ил') голову", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'забить до смерти': {"emoji": "🪦", "action": "забg('ил') до смерти", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'сбросить с обрыва': {"emoji": "🏔️", "action": "сбросg('ил') с обрыва", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'прибить гвоздями': {"emoji": "🔩", "action": "прибg('ил') гвоздями", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выкрутить руки': {"emoji": "🦾", "action": "выкрутg('ил') руки", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'разорвать рот': {"emoji": "👄", "action": "разорвg('ал') рот", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'воткнуть нож в спину': {"emoji": "🔪", "action": "воткнg('ул') нож в спину", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'перерезать сухожилия': {"emoji": "🩻", "action": "перерезg('ал') сухожилия", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'разрезать язык': {"emoji": "👅", "action": "разрезg('ал') язык", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выколоть иглой': {"emoji": "🪡", "action": "выколg('ол') иглой", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отпилить ногу': {"emoji": "🪚", "action": "отпилg('ил') ногу", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'съесть заживо': {"emoji": "🍖", "action": "съg('ел') заживо", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'утопить в болоте': {"emoji": "🪷", "action": "утопg('ил') в болоте", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'засыпать песком': {"emoji": "⏳", "action": "засыпg('ал') песком", "rating": AgeRating.EIGHTEEN_PLUS.value},
+
+    # === СЕКСУАЛЬНЫЕ (18+) ===
+    'выебать': {"emoji": "🍆", "action": "выеbg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'оттрахать': {"emoji": "💦", "action": "оттрахg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'вставить': {"emoji": "🔞", "action": "вставg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'засадить': {"emoji": "🍑", "action": "засадg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'иметь': {"emoji": "🔥", "action": "имg('ел')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'поиметь': {"emoji": "💢", "action": "поимg('ел')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отжарить': {"emoji": "🍳", "action": "отжарg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отшлёпать': {"emoji": "🖐️", "action": "отшлёпg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'вылизать': {"emoji": "👅", "action": "вылизg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отсосать': {"emoji": "🥤", "action": "отсосg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'взять в рот': {"emoji": "👄", "action": "взg('ял') в рот", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'заглотить': {"emoji": "🥵", "action": "заглотg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'кончить': {"emoji": "💦", "action": "кончg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'спустить': {"emoji": "💧", "action": "спустg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'обкончать': {"emoji": "🌊", "action": "обкончg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'залить спермой': {"emoji": "🥛", "action": "залg('ил') спермой", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'вымазать спермой': {"emoji": "🎨", "action": "вымазg('ал') спермой", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отливать': {"emoji": "🚿", "action": "отливg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'обоссать': {"emoji": "💛", "action": "обоссg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'зассать': {"emoji": "💦", "action": "зассg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'нассать в рот': {"emoji": "👄", "action": "нассg('ал') в рот", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'нассать на лицо': {"emoji": "😳", "action": "нассg('ал') на лицо", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'накакать': {"emoji": "💩", "action": "накакg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'измазать калом': {"emoji": "🤎", "action": "измазg('ал') калом", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выесть': {"emoji": "🍽️", "action": "выg('ел')", "rating": AgeRating.EIGHTEEN_PLUS.value},  # окончание 1 буква 'л' - исключение
+    'вылизать киску': {"emoji": "😺", "action": "вылизg('ал') киску", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отлизать': {"emoji": "👅", "action": "отлизg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'засунуть': {"emoji": "📥", "action": "засунg('ул')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'засунуть в жопу': {"emoji": "🍑", "action": "засунg('ул') в жопу", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'засунуть в рот': {"emoji": "👄", "action": "засунg('ул') в рот", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'засунуть в пизду': {"emoji": "🌮", "action": "засунg('ул') в пизду", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'засунуть руку': {"emoji": "🖐️", "action": "засунg('ул') руку", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'засунуть пальцы': {"emoji": "👆", "action": "засунg('ул') пальцы", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'раздвинуть ноги': {"emoji": "🦵", "action": "раздвинg('ул') ноги", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'раздвинуть ягодицы': {"emoji": "🍑", "action": "раздвинg('ул') ягодицы", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'запрокинуть ноги': {"emoji": "🦶", "action": "запрокинg('ул') ноги", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'привязать к кровати': {"emoji": "🛏️", "action": "привязg('ал') к кровати", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'связать руки': {"emoji": "🪢", "action": "связg('ал') руки", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'завязать глаза': {"emoji": "👀", "action": "завязg('ал') глаза", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'кляп в рот': {"emoji": "🔴", "action": "вставg('ил') кляп в рот", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отшлёпать ремнём': {"emoji": "🪢", "action": "отшлёпg('ал') ремнём", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выпороть': {"emoji": "🪄", "action": "выпорg('ол')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отходить плёткой': {"emoji": "🐍", "action": "отходg('ил') плёткой", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отходить': {"emoji": "🪄", "action": "отходg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'оттрахать в жопу': {"emoji": "🍑", "action": "оттрахg('ал') в жопу", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'оттрахать в рот': {"emoji": "👄", "action": "оттрахg('ал') в рот", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'оттрахать в пизду': {"emoji": "🌮", "action": "оттрахg('ал') в пизду", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'иметь в жопу': {"emoji": "🍑", "action": "имg('ел') в жопу", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'иметь в рот': {"emoji": "👄", "action": "имg('ел') в рот", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'иметь в пизду': {"emoji": "🌮", "action": "имg('ел') в пизду", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выебать в жопу': {"emoji": "🍑", "action": "выebg('ал') в жопу", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выебать в рот': {"emoji": "👄", "action": "выebg('ал') в рот", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выебать в пизду': {"emoji": "🌮", "action": "выebg('ал') в пизду", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выдрать': {"emoji": "🪵", "action": "выдрg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'выдрать в жопу': {"emoji": "🍑", "action": "выдрg('ал') в жопу", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отодрать': {"emoji": "💢", "action": "отодрg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'отодрать в жопу': {"emoji": "🍑", "action": "отодрg('ал') в жопу", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'нагнуть': {"emoji": "🔄", "action": "нагнg('ул')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'нагнуть и выебать': {"emoji": "🔄🍆", "action": "нагнg('ул') и выebg('ал')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'раком поставить': {"emoji": "🐕", "action": "раком поставg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
+    'четвереньки': {"emoji": "🦶", "action": "на четвереньки поставg('ил')", "rating": AgeRating.EIGHTEEN_PLUS.value},
 }
 
 # Создаем объекты команд
@@ -123,10 +320,10 @@ class CacheManager:
     """Менеджер кэша с автоматической очисткой"""
 
     def __init__(self):
-        self.cache_usage = defaultdict(dict)  # Статистика использования кэша
+        self.cache_usage = defaultdict(dict)
         self.last_cleanup = datetime.now()
         self.cache_stats = {"hits": 0, "misses": 0, "cleared": 0}
-        self.ratings_cache = {}  # Кэш рейтингов чатов
+        self.ratings_cache = {}
         self.cache_lock = asyncio.Lock()
 
     async def start_cleanup_task(self):
@@ -148,7 +345,6 @@ class CacheManager:
             current_time = datetime.now()
 
             async with self.cache_lock:
-                # Удаляем устаревшие записи из кэша
                 keys_to_remove = []
                 for chat_id, cache_data in self.ratings_cache.items():
                     if "timestamp" in cache_data:
@@ -164,7 +360,6 @@ class CacheManager:
                     logger.info(f"Кэш очищен. Очищено записей: {len(keys_to_remove)}")
                     self.last_cleanup = current_time
 
-            # Логируем статистику
             self.log_cache_stats()
 
         except Exception as e:
@@ -217,7 +412,6 @@ class CacheManager:
                 del self.ratings_cache[chat_id]
 
 
-# Инициализируем менеджер кэша
 cache_manager = CacheManager()
 
 
@@ -234,73 +428,36 @@ class RPInputParser:
         return text.strip()
 
     @staticmethod
-    def is_mention(part: str) -> bool:
-        """Проверяет, является ли часть упоминанием"""
-        if not part:
-            return False
-
-        # Проверяем различные форматы упоминаний
-        return (part.startswith('@') or
-                part.startswith('{') or
-                part.startswith('[') or
-                part.isdigit() or
-                part.startswith('tg://user?id=') or
-                'id=' in part or
-                'user=' in part)
-
-    @staticmethod
     def parse_text(text: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
         """
-        Парсит текст команды формата:
-        {команда} {@/ссылка/ответ} {уточнение}\n{комментарий}
-
-        Возвращает: (команда, упоминание, уточнение, комментарий)
+        Упрощенный парсер: первое слово - команда, второе - упоминание, остальное - уточнение
         """
         try:
             lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
             if not lines:
                 return None, None, None, None
 
-            # Обрабатываем первую строку (команда с аргументами)
             command_line = RPInputParser.clean_command(lines[0])
             parts = command_line.split()
 
-            if not parts:
+            if len(parts) < 1:
                 return None, None, None, None
 
-            # Ищем команду
             base_command = parts[0].lower()
-
-            # Нормализуем команду (заменяем пробелы на подчеркивания для поиска)
             normalized_command = base_command.replace(' ', '_')
 
-            # Ищем соответствующую команду
             command_obj = None
             for cmd_key, cmd_obj in RP_COMMANDS.items():
                 if normalized_command.startswith(cmd_key):
                     command_obj = cmd_obj
-                    base_command = cmd_key  # Используем каноническое имя
+                    base_command = cmd_key
                     break
 
             if not command_obj:
                 return None, None, None, None
 
-            # Обрабатываем остальные части
-            mention = None
-            clarification_parts = []
-
-            for i, part in enumerate(parts[1:], 1):
-                if mention is None and RPInputParser.is_mention(part):
-                    # Если это первое упоминание - сохраняем его КАК ЕСТЬ
-                    mention = part
-                    continue
-
-                # Всё остальное - часть уточнения
-                clarification_parts.append(part)
-
-            clarification = ' '.join(clarification_parts) if clarification_parts else None
-
-            # Извлекаем комментарий (все строки после первой)
+            mention = parts[1] if len(parts) > 1 else None
+            clarification = ' '.join(parts[2:]) if len(parts) > 2 else None
             comment = '\n'.join(lines[1:]) if len(lines) > 1 else None
 
             return base_command, mention, clarification, comment
@@ -341,7 +498,6 @@ class RPChecker:
     @staticmethod
     async def get_cached_chat_rating(chat_id: int) -> int:
         """Получить кэшированный рейтинг чата"""
-        # Пробуем получить из кэша
         cached_rating = await cache_manager.get_cached_rating(chat_id)
         if cached_rating is not None:
             return cached_rating
@@ -370,7 +526,6 @@ class RPChecker:
                     UPDATE chats SET min_rp_rating = $1 WHERE chat_id = $2
                 ''', rating, chat_id)
 
-        # Сохраняем в кэш
         await cache_manager.set_cached_rating(chat_id, rating)
         return rating
 
@@ -399,19 +554,13 @@ class RPChecker:
                     UPDATE chats SET min_rp_rating = $1 WHERE chat_id = $2
                 ''', rating, chat_id)
 
-        # Инвалидируем кэш для этого чата и обновляем его
         await cache_manager.invalidate_cache(chat_id)
         await cache_manager.set_cached_rating(chat_id, rating)
-
         return rating
 
     @staticmethod
     async def is_command_allowed(chat_id: int, command_rating: int) -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """
-        Проверяет, разрешена ли RP-команда с данным рейтингом в чате.
-
-        Возвращает: (разрешено, сообщение_об_ошибке)
-        """
+        """Проверяет, разрешена ли RP-команда с данным рейтингом в чате"""
         try:
             chat_min_rating = await RPChecker.get_cached_chat_rating(chat_id)
 
@@ -469,50 +618,65 @@ class RPUserResolver:
 
         Приоритет:
         1. Ответ на сообщение (reply)
-        2. Упоминание в тексте (все типы) - ВСЕГДА через resolve_id
-
-        Возвращает словарь с ID пользователя и объектом пользователя
+        2. Упоминание в тексте (через resolve_id)
         """
         try:
             target_id = None
             user_obj = None
 
-            # 1. Проверяем reply
+            # 1. Проверяем reply (наивысший приоритет)
             if m.reply_to_message and m.reply_to_message.from_user:
                 target_id = m.reply_to_message.from_user.id
                 user_obj = m.reply_to_message.from_user
-                logger.debug(f"Найден target_id из reply: {target_id}")
-
-            # 2. Если есть упоминание - ВСЕГДА пропускаем через resolve_id КАК ЕСТЬ
-            elif mention:
-                logger.debug(f"Пытаемся разрешить упоминание через resolve_id: {mention}")
-
-                # Передаем упоминание КАК ЕСТЬ, без очистки
-                target_id = await resolve_id(m, mention)
-
-                if target_id:
-                    logger.debug(f"resolve_id вернул ID: {target_id}")
-                    try:
-                        chat = await m.bot.get_chat(target_id)
-                        # Создаем минимальный объект пользователя
-                        user_obj = type('MinimalUser', (), {
-                            'id': chat.id,
-                            'first_name': chat.first_name or "",
-                            'last_name': chat.last_name or "",
-                            'username': chat.username
-                        })()
-                    except Exception as e:
-                        logger.error(f"Ошибка получения данных пользователя {target_id}: {e}")
-                else:
-                    logger.warning(f"resolve_id не смог разрешить упоминание: {mention}")
-
-            if target_id:
+                logger.info(f"Найден target_id из reply: {target_id}")
                 return {
                     'id': target_id,
                     'user_obj': user_obj
                 }
 
-            logger.debug("Не удалось определить целевого пользователя")
+            # 2. Если есть упоминание - передаем в resolve_id
+            if mention:
+                # Пробуем как есть
+                target_id = await resolve_id(m, mention)
+
+                if not target_id and mention.startswith('@'):
+                    # Пробуем без @
+                    alt_mention = mention[1:]
+                    target_id = await resolve_id(m, alt_mention)
+
+                if not target_id and '/' in mention:
+                    # Пробуем извлечь username из ссылки
+                    parts = mention.split('/')
+                    last_part = parts[-1]
+                    if '?' in last_part:
+                        last_part = last_part.split('?')[0]
+                    if last_part and len(last_part) > 1:
+                        target_id = await resolve_id(m, f"@{last_part}")
+
+                if target_id:
+                    try:
+                        # Пытаемся получить информацию о пользователе
+                        chat_member = await m.bot.get_chat_member(m.chat.id, target_id)
+                        user_obj = chat_member.user if hasattr(chat_member, 'user') else None
+                    except Exception as e:
+                        logger.debug(f"Не удалось получить chat_member: {e}")
+                        # Создаем минимальный объект
+                        user_obj = type('MinimalUser', (), {
+                            'id': target_id,
+                            'first_name': f"User",
+                            'last_name': None,
+                            'username': None
+                        })()
+
+                    return {
+                        'id': target_id,
+                        'user_obj': user_obj
+                    }
+                else:
+                    logger.warning(f"resolve_id не смог разрешить: '{mention}'")
+                    return None
+
+            logger.info("Не удалось определить целевого пользователя")
             return None
 
         except Exception as e:
@@ -551,12 +715,14 @@ class RPFormatter:
             # Получаем действие с учетом пола
             action = command.get_action(admin_gender)
 
-            # Создаем ссылки через user_link_with_pseudonym
+            # Создаем ссылки
             admin_link = await user_link_with_pseudonym(admin_id, chat_id)
+            admin_tag_link = f'<a href="tg://user?id={admin_id}">\u200e</a>'
             target_link = await user_link_with_pseudonym(target_user['id'], chat_id)
+            tag_link = f'<a href="tg://user?id={target_user["id"]}">\u200e</a>'
 
             # Формируем сообщение
-            message_parts = [f"{command.emoji} | {admin_link} {action} {target_link}"]
+            message_parts = [f"{command.emoji} | {admin_link} {admin_tag_link}{action} {tag_link}{target_link}"]
 
             # Добавляем уточнение
             if clarification:
@@ -575,7 +741,6 @@ class RPFormatter:
     @staticmethod
     def _add_clarification(message_parts: List[str], clarification: str) -> None:
         """Добавить уточнение к сообщению"""
-        # Обрабатываем предлоги
         preposition_pattern = r'^(по|на|за|в|с|к|у|о|об|от|до|из|без|под|над|перед|при|про|через)\s+'
 
         if re.match(preposition_pattern, clarification.lower()):
@@ -612,9 +777,7 @@ class RPSettingsHandler:
                     DO UPDATE SET min_rp_rating = $2
                 ''', chat_id, rating)
 
-            # Инвалидируем кэш для этого чата
             await cache_manager.invalidate_cache(chat_id)
-
             return True
 
         except Exception as e:
@@ -632,7 +795,6 @@ class RPSettingsHandler:
 
             rating = int(rating_str)
 
-            # Определяем в какую группу попадает рейтинг
             if rating >= 18:
                 return True, 18
             elif rating >= 13:
@@ -650,28 +812,22 @@ async def cleanup_cache_on_startup():
     logger.info("Задача автоматической очистки кэша запущена")
 
 
-# Основной обработчик RP команд
 async def handle_rp_command(m: Message) -> None:
     """Основной обработчик RP команд"""
     try:
         chat_id = m.chat.id
+        user_id = m.from_user.id
         text = m.text.strip()
-
-        logger.debug(f"Обработка RP команды: {text[:50]}...")
 
         # Парсим команду
         base_command, mention, clarification, comment = RPInputParser.parse_text(text)
 
         if not base_command:
-            logger.debug("Не удалось распарсить базовую команду")
             return
-
-        logger.debug(f"Распаршено: команда={base_command}, упоминание={mention}, уточнение={clarification}")
 
         # Получаем объект команды
         command = RP_COMMANDS.get(base_command)
         if not command:
-            logger.debug(f"Команда {base_command} не найдена в RP_COMMANDS")
             return
 
         # Проверяем ограничения по рейтингу
@@ -700,10 +856,29 @@ async def handle_rp_command(m: Message) -> None:
         target_user_data = await RPUserResolver.resolve_target_user(m, mention)
 
         if not target_user_data:
-            await m.answer("❌ Не удалось определить пользователя. Укажите пользователя через ответ или упоминание.")
+            error_text = "❌ Не удалось определить пользователя.\n\n"
+
+            if mention:
+                error_text += f"Указано: <code>{html.escape(mention)}</code>\n\n"
+                error_text += "Возможные причины:\n"
+                error_text += "• Пользователь не найден в базе данных бота\n"
+                error_text += "• Неверный формат упоминания\n"
+                error_text += "• Пользователь заблокировал бота\n\n"
+                error_text += "Попробуйте:\n"
+                error_text += "1. Ответить на сообщение пользователя\n"
+                error_text += "2. Указать @никнейм\n"
+                error_text += "3. Указать ID пользователя"
+            else:
+                error_text += "Укажите пользователя одним из способов:\n"
+                error_text += "• Ответьте на сообщение пользователя\n"
+                error_text += "• Напишите @никнейм\n"
+                error_text += "• Укажите ID пользователя\n"
+                error_text += "• Пришлите ссылку на профиль"
+
+            await m.answer(error_text, parse_mode="HTML")
             return
 
-        logger.debug(f"Целевой пользователь определен: ID={target_user_data['id']}")
+        target_id = target_user_data['id']
 
         # Проверяем валидность пользователей
         is_valid, error_msg = RPUserResolver.validate_users(m.from_user, target_user_data)
@@ -714,7 +889,7 @@ async def handle_rp_command(m: Message) -> None:
         # Форматируем и отправляем сообщение
         formatted_message = await RPFormatter.format_rp_message(
             command=command,
-            admin_id=m.from_user.id,
+            admin_id=user_id,
             target_user=target_user_data,
             chat_id=chat_id,
             clarification=clarification,
@@ -731,6 +906,10 @@ async def handle_rp_command(m: Message) -> None:
 @RP.message(F.text.regexp(r'^[+\-]?рп\b'))
 async def handle_rp_settings_command(m: Message):
     """Обработчик команд управления настройками RP"""
+
+    if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 72):
+        return
+
     try:
         text = m.text.strip().lower()
 
@@ -756,7 +935,6 @@ async def handle_rp_settings_command(m: Message):
             current_rating = await RPChecker.get_cached_chat_rating(m.chat.id)
             current_display = RATING_DISPLAY.get(current_rating, f"{current_rating}+")
 
-            # Создаем клавиатуру с быстрыми действиями
             builder = InlineKeyboardBuilder()
             builder.button(text="🔴 Отключить РП", callback_data="rp_settings:disable")
             builder.button(text="🟢 0+", callback_data="rp_settings:0")
@@ -778,8 +956,6 @@ async def handle_rp_settings_command(m: Message):
             return
 
         args = match.group(1).strip()
-
-        # Парсим рейтинг
         success, rating = RPSettingsHandler.parse_rating_argument(args.split()[0])
 
         if not success:
@@ -794,7 +970,6 @@ async def handle_rp_settings_command(m: Message):
             )
             return
 
-        # Устанавливаем новый рейтинг
         success = await RPSettingsHandler.set_rp_rating(m.chat.id, rating)
 
         if success:
@@ -812,7 +987,11 @@ async def handle_rp_settings_command(m: Message):
 async def handle_enable_rp_callback(callback: CallbackQuery):
     """Обработчик callback для включения RP"""
     try:
-        # Разбираем callback_data: enable_rp:{rating}:{chat_id}
+        # Проверяем права доступа
+        if not await auto_check_AccessLevel_for_rang(callback.from_user.id, callback.message.chat.id, 72):
+            await callback.answer("❌ У вас нет прав для выполнения этого действия", show_alert=True)
+            return
+
         data_parts = callback.data.split(":")
         if len(data_parts) != 3:
             await callback.answer("❌ Неверный формат данных", show_alert=True)
@@ -822,14 +1001,17 @@ async def handle_enable_rp_callback(callback: CallbackQuery):
         rating = int(rating_str)
         chat_id = int(chat_id_str)
 
-        # Устанавливаем новый рейтинг
+        # Проверяем, что callback из того же чата
+        if callback.message.chat.id != chat_id:
+            await callback.answer("❌ Эта кнопка действительна только для этого чата", show_alert=True)
+            return
+
         success = await RPSettingsHandler.set_rp_rating(chat_id, rating)
 
         if not success:
             await callback.answer("❌ Ошибка при включении РП", show_alert=True)
             return
 
-        # Обновляем сообщение
         rating_display = RATING_DISPLAY.get(rating, f"{rating}+")
         admin_mention = callback.from_user.mention_html(callback.from_user.first_name)
 
@@ -841,9 +1023,11 @@ async def handle_enable_rp_callback(callback: CallbackQuery):
                 parse_mode="HTML",
                 reply_markup=None
             )
-        except TelegramBadRequest:
-            # Если сообщение уже было изменено, просто отвечаем
-            pass
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e).lower():
+                await callback.answer("✅ Настройки уже применены")
+                return
+            raise
 
         await callback.answer(f"✅ РП рейтинг установлен: {rating_display}")
 
@@ -851,43 +1035,58 @@ async def handle_enable_rp_callback(callback: CallbackQuery):
         await callback.answer("❌ Ошибка в данных", show_alert=True)
     except Exception as e:
         logger.error(f"Ошибка обработки enable_rp callback: {e}", exc_info=True)
-        await callback.answer(f"❌ Произошла ошибка: {str(e)}", show_alert=True)
+        await callback.answer(f"❌ Произошла ошибка", show_alert=True)
 
 
 @RP.callback_query(F.data.startswith("rp_settings:"))
 async def handle_rp_settings_callback(callback: CallbackQuery):
     """Обработчик callback для быстрой настройки RP"""
     try:
+        # Проверяем права доступа
+        if not await auto_check_AccessLevel_for_rang(callback.from_user.id, callback.message.chat.id, 72):
+            await callback.answer("❌ У вас нет прав для выполнения этого действия", show_alert=True)
+            return
+
         action = callback.data.split(":")[1]
 
         if action == "disable":
             rating_to_set = DISABLED_RATING
             rating_display = "отключены"
         else:
-            rating_to_set = int(action)
-            rating_display = RATING_DISPLAY.get(rating_to_set, f"{rating_to_set}+")
+            try:
+                rating_to_set = int(action)
+                rating_display = RATING_DISPLAY.get(rating_to_set, f"{rating_to_set}+")
+            except ValueError:
+                await callback.answer("❌ Неверное значение рейтинга", show_alert=True)
+                return
 
-        # Устанавливаем новый рейтинг
         success = await RPSettingsHandler.set_rp_rating(callback.message.chat.id, rating_to_set)
 
         if not success:
             await callback.answer("❌ Ошибка при изменении настроек", show_alert=True)
             return
 
-        # Обновляем сообщение
-        await callback.message.edit_text(
-            f"✅ Настройки РП обновлены!\n"
-            f"Новый рейтинг: {rating_display}\n\n"
-            f"👮🏻 Администратор: {callback.from_user.mention_html(callback.from_user.first_name)}",
-            parse_mode="HTML",
-            reply_markup=None
-        )
+        try:
+            await callback.message.edit_text(
+                f"✅ Настройки РП обновлены!\n"
+                f"Новый рейтинг: {rating_display}\n\n"
+                f"👮🏻 Администратор: {callback.from_user.mention_html(callback.from_user.first_name)}",
+                parse_mode="HTML",
+                reply_markup=None
+            )
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e).lower():
+                await callback.answer("✅ Настройки уже применены")
+                return
+            raise
 
         await callback.answer(f"✅ РП установлен: {rating_display}")
 
+    except IndexError:
+        await callback.answer("❌ Неверный формат данных", show_alert=True)
     except Exception as e:
         logger.error(f"Ошибка обработки rp_settings callback: {e}", exc_info=True)
-        await callback.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
+        await callback.answer(f"❌ Произошла ошибка", show_alert=True)
 
 
 # Регистрируем обработчик для всех RP команд
@@ -897,5 +1096,31 @@ RP_PATTERN = rf'^[!./]?({ALL_RP_COMMANDS})(?:\s|$)'
 
 @RP.message(F.text.regexp(RP_PATTERN, flags=re.IGNORECASE))
 async def handle_all_rp_commands(m: Message):
+    if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 71):
+        return
+
     """Обработчик всех RP-команд"""
     await handle_rp_command(m)
+
+
+# Функция для тестирования ссылок
+async def test_telegram_links():
+    """Тестирование различных форматов ссылок Telegram"""
+    test_cases = [
+        "@username",
+        "https://t.me/username",
+        "t.me/username",
+        "telegram.me/username",
+        "tg://resolve?domain=username",
+        "tg://user?id=123456789",
+        "https://t.me/username?start=123",
+        "https://t.me/username/456",
+        "username",
+        "123456789",
+    ]
+
+    logger.info("=== Тестирование форматов ссылок ===")
+    for test_case in test_cases:
+        logger.info(f"Тест: {test_case}")
+
+    logger.info("=== Конец тестирования ===")

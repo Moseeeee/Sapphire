@@ -24,7 +24,7 @@ class MultiBotConfig:
         #{
             #'id': 'bot_3',
             #'name': '👁️‍🗨️ Sanor Test Bot',
-            #'TOKEN': "7779546434:AAHmLdtTreqDL2OUjyzKSe-nXrnsAvWvHYk",
+            #'TOKEN': "8277713159:AAHUN9FtoPX02G2bNaOUb3HMRuE4LcZRYbY",
         #}
     ]
 

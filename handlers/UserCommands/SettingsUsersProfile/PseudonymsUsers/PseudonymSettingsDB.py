@@ -1,33 +1,49 @@
-
 import logging
+from typing import Optional
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.ConnectDataBaseCache import auto_cache_update
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 
 logger = logging.getLogger(__name__)
 
 # Лимиты для псевдонимов
-MAX_PSEUDONYM_LENGTH = 64  # Максимальная длина псевдонима
-MIN_PSEUDONYM_LENGTH = 0  # Минимальная длина псевдонима
+MAX_PSEUDONYM_LENGTH = 64  # Максимальная длина псевдонима (как указано в обработчике)
+MIN_PSEUDONYM_LENGTH = 1  # Минимальная длина псевдонима
 
 
 @auto_cache_update('users_chats', 'user_id')
-async def update_user_pseudonym(chat_id: int, user_id: int, pseudonym: str) -> None:
+async def update_user_pseudonym(chat_id: int, user_id: int, pseudonym: str) -> bool:
     """Обновляет или добавляет псевдоним пользователя в чате."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
+            # Проверяем, не занят ли уже этот псевдоним другим пользователем
+            existing_user = await conn.fetchrow(
+                '''
+                SELECT user_id FROM users_chats 
+                WHERE chat_id = $1 
+                AND pseudonym = $2 
+                AND user_id != $3
+                ''',
+                chat_id, pseudonym, user_id
+            )
+
+            if existing_user:
+                return False  # Псевдоним уже занят
+
+            # Обновляем псевдоним
             await conn.execute('''
                 INSERT INTO users_chats (chat_id, user_id, pseudonym) 
                 VALUES ($1, $2, $3)
                 ON CONFLICT (chat_id, user_id) 
                 DO UPDATE SET pseudonym = EXCLUDED.pseudonym
             ''', chat_id, user_id, pseudonym)
+            return True
     except Exception as e:
         logger.error(f"Ошибка при обновлении псевдонима: {e}", exc_info=True)
         raise
 
 
-async def get_user_pseudonym(chat_id: int, user_id: int) -> str:
+async def get_user_pseudonym(chat_id: int, user_id: int) -> Optional[str]:
     """Получает псевдоним пользователя в конкретном чате."""
     try:
         pool = get_db_pool()
@@ -62,6 +78,7 @@ async def delete_user_pseudonym(chat_id: int, user_id: int) -> bool:
         logger.error(f"Ошибка при удалении псевдонима: {e}", exc_info=True)
         return False
 
+
 async def get_chat_pseudonyms(chat_id: int) -> dict:
     """Получает все псевдонимы в чате."""
     try:
@@ -95,3 +112,40 @@ def validate_pseudonym(pseudonym: str) -> tuple[bool, str]:
         return False, "Псевдоним не может состоять только из пробелов"
 
     return True, pseudonym
+
+
+async def is_pseudonym_taken(chat_id: int, pseudonym: str, exclude_user_id: int = None) -> tuple[bool, Optional[int]]:
+    """Проверяет, занят ли псевдоним в чате.
+
+    Returns:
+        tuple[bool, Optional[int]]: (занят_ли, id_пользователя_владельца)
+    """
+    try:
+        pool = get_db_pool()
+        async with pool.acquire() as conn:
+            if exclude_user_id:
+                row = await conn.fetchrow(
+                    '''
+                    SELECT user_id FROM users_chats 
+                    WHERE chat_id = $1 
+                    AND pseudonym = $2 
+                    AND user_id != $3
+                    ''',
+                    chat_id, pseudonym, exclude_user_id
+                )
+            else:
+                row = await conn.fetchrow(
+                    '''
+                    SELECT user_id FROM users_chats 
+                    WHERE chat_id = $1 
+                    AND pseudonym = $2
+                    ''',
+                    chat_id, pseudonym
+                )
+
+            if row:
+                return True, row['user_id']
+            return False, None
+    except Exception as e:
+        logger.error(f"Ошибка при проверке псевдонима: {e}", exc_info=True)
+        return False, None

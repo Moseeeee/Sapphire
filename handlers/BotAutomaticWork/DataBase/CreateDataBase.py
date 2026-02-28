@@ -98,6 +98,7 @@ async def create_db():
                 message_id BIGINT,
                 admin_message_id BIGINT,
                 user_id BIGINT,
+                is_edit BOOLEAN DEFAULT False,
                 PRIMARY KEY (chat_id, notes_name)
                 );
             ''')
@@ -270,12 +271,13 @@ async def create_db():
         async with pool.acquire() as conn:
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS warns (
-                chat_id BIGINT NOT NULL,
-                user_id BIGINT NOT NULL,
-                admin_id BIGINT NOT NULL,
-                reason TEXT DEFAULT 'Не указана',
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+                    id SERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    admin_id BIGINT NOT NULL,
+                    reason TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE,
+                    expires_at TIMESTAMP WITH TIME ZONE
                 );
             ''')
 
@@ -465,6 +467,58 @@ async def create_db():
                 # Индексы для оптимизации
                 #await conn.execute('CREATE INDEX IF NOT EXISTS idx_whitelist_chat ON link_filter_whitelist(chat_id)')
 
+
+
+        async with pool.acquire() as conn:
+            # Основная таблица для первого комментария
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS first_comments (
+                    channel_id BIGINT PRIMARY KEY,
+                    comment_text TEXT NOT NULL
+                )
+            ''')
+
+            # Таблица для кнопок (максимум 5 на канал)
+            async with pool.acquire() as conn:
+                await conn.execute('''
+                CREATE TABLE IF NOT EXISTS first_comment_buttons (
+                    channel_id BIGINT NOT NULL,
+                    button_index INTEGER NOT NULL, -- 0-4
+                    button_text VARCHAR(50) NOT NULL,
+                    button_url VARCHAR(500) NOT NULL,
+                    PRIMARY KEY (channel_id, button_index),
+                    FOREIGN KEY (channel_id) REFERENCES first_comments(channel_id) ON DELETE CASCADE
+                )
+            ''')
+
+            # Таблица для модерации первого комментария
+            async with pool.acquire() as conn:
+                await conn.execute('''
+                CREATE TABLE IF NOT EXISTS first_comment_moderation (
+                    channel_id BIGINT PRIMARY KEY,
+                    comment_text TEXT NOT NULL,
+                    user_message_id INTEGER NOT NULL,
+                    admin_message_id INTEGER,
+                    user_id BIGINT NOT NULL,
+                    status VARCHAR(20) DEFAULT 'pending', -- pending, approved, rejected
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            ''')
+
+            # Таблица для кнопок на модерации
+            async with pool.acquire() as conn:
+                await conn.execute('''
+                CREATE TABLE IF NOT EXISTS first_comment_moderation_buttons (
+                    channel_id BIGINT NOT NULL,
+                    button_index INTEGER NOT NULL,
+                    button_text VARCHAR(50) NOT NULL,
+                    button_url VARCHAR(500) NOT NULL,
+                    PRIMARY KEY (channel_id, button_index),
+                    FOREIGN KEY (channel_id) REFERENCES first_comment_moderation(channel_id) ON DELETE CASCADE
+                )
+            ''')
+
+
         # ========== КОМАНДЫ И ПРАВА ==========
         async with pool.acquire() as conn:
             await conn.execute('''
@@ -599,9 +653,12 @@ async def init_commands_structure():
         {"UnderSectionId": 16, "UnderName": "Управление уведомлениями", "SectionId": 2},
         {"UnderSectionId": 17, "UnderName": "Система доступа команд", "SectionId": 2},
         {"UnderSectionId": 18, "UnderName": "Система защиты", "SectionId": 2},
+        {"UnderSectionId": 73, "UnderName": "Система первого комментария", "SectionId": 2},
 
         {"UnderSectionId": 19, "UnderName": "Информация о участниках", "SectionId": 3},
         {"UnderSectionId": 20, "UnderName": "Профиль участников", "SectionId": 4},
+        {"UnderSectionId": 70, "UnderName": "Ролевые команды", "SectionId": 4},
+        {"UnderSectionId": 76, "UnderName": "Помощь", "SectionId": 4},
     ]
 
     commands = [
@@ -661,6 +718,8 @@ async def init_commands_structure():
         {"names": ["Настройка заметок"], "CommandId": 51, "AccessLevel": 4, "UnderSectionId": 14},
         {"names": ["Просмотр заметок"], "CommandId": 52, "AccessLevel": 0, "UnderSectionId": 14},
 
+        {"names": ["Настройка первого комментария"], "CommandId": 74, "AccessLevel": 2, "UnderSectionId": 73},
+        {"names": ["Просмотр первого комментария"], "CommandId": 75, "AccessLevel": 4, "UnderSectionId": 73},
 
         {"names": ["Управление закрепами"], "CommandId": 53, "AccessLevel": 3, "UnderSectionId": 15},
         {"names": ["Управление закрепами"], "CommandId": 63, "AccessLevel": 3, "UnderSectionId": 15},
@@ -678,7 +737,9 @@ async def init_commands_structure():
         {"names": ["Настройка профиля пользователя"], "CommandId": 68, "AccessLevel": 0, "UnderSectionId": 20},
         {"names": ["Список ников"], "CommandId": 69, "AccessLevel": 0, "UnderSectionId": 20},
         {"names": ["Погода"], "CommandId": 59, "AccessLevel": 0, "UnderSectionId": 20},
-
+        {"names": ["Ролевые команды"], "CommandId": 71, "AccessLevel": 0, "UnderSectionId": 70},
+        {"names": ["Настройка ролевых команд"], "CommandId": 72, "AccessLevel": 3, "UnderSectionId": 70},
+        {"names": ["Список команд бота"], "CommandId": 77, "AccessLevel": 0, "UnderSectionId": 76},
     ]
 
     async with pool.acquire() as conn:

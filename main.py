@@ -124,13 +124,13 @@ async def reload_all_handlers():
         'handlers.start',
         'handlers.AgentsFeatures.AgentCheckPing',
         'handlers.AgentsFeatures.ManagementAgents.ManagementAgents',
-        'handlers.AgentsFeatures.server_info',
+        'handlers.sanor_commands.server_info',
         'handlers.AgentsFeatures.AntiSpam.AntiSpam',
         'handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovals',
         'handlers.AgentsFeatures.ManagementAgents.AgentChatsAndChannelsdminsManagement',
         'handlers.AgentsFeatures.add_AntiSpamAndIgnore',
         'handlers.AgentsFeatures.ignoreUsers.ignore_manager',
-        'handlers.AgentsFeatures.chat_info.ChatsInfo',
+        'handlers.sanor_commands.chat_info.ChatsInfo',
         'handlers.AdminsTools.ChatSettings.AntiSpamSettings.AntiSpamSettings',
         'handlers.AdminsTools.ChatSettings.ChatAdmins.add_tg_admin',
         'handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.SmsStatsCommand',
@@ -162,9 +162,13 @@ async def reload_all_handlers():
         'handlers.testDirectiry.UpdateChatInfo',
         'handlers.BotAutomaticWork.AddChatsBot.AddChatsBot',
         'handlers.testing',
-        'handlers.AgentsFeatures.payment.payment',
+        'handlers.sanor_commands.payment.payment',
         'handlers.testDirectiry.ChatSettingsAutomatic.ChatSettings',
         'handlers.testDirectiry.testing'
+        'handlers.sanor_commands.CheckPremiumEmodji'
+        'handlers.AdminsTools.ChatSettings.first_comment.first_comment'
+        'handlers.AdminsTools.ChatSettings.first_comment.first_comment_auto',
+        'handlers.UserCommands.sapphire_commands'
     ]
 
     for module_name in modules_to_reload:
@@ -192,7 +196,7 @@ async def load_all_routers():
     from handlers.AgentsFeatures.ManagementAgents.ManagementAgents import aa
     routers.append(aa)
 
-    from handlers.AgentsFeatures.server_info import server_stats_router
+    from handlers.sanor_commands.server_info import server_stats_router
     routers.append(server_stats_router)
 
     from handlers.AgentsFeatures.AntiSpam.AntiSpam import as_router
@@ -239,7 +243,7 @@ async def load_all_routers():
     from handlers.AdminsTools.CommandsModerations.bans.ban import bans
     routers.append(bans)
 
-    from handlers.AgentsFeatures.chat_info.ChatsInfo import chat_info_router
+    from handlers.sanor_commands.chat_info.ChatsInfo import chat_info_router
     routers.append(chat_info_router)
 
     from handlers.AdminsTools.ChatSettings.Stats.ChatsUsersStats.chat_users_stats import CUS
@@ -282,7 +286,7 @@ async def load_all_routers():
     from handlers.UserCommands.user_profile import profile
     routers.append(profile)
 
-    from handlers.AgentsFeatures.payment.payment import sapphires_router
+    from handlers.sanor_commands.payment.payment import sapphires_router
     routers.append(sapphires_router)
 
     from handlers.UserCommands.weather import weather_router
@@ -293,6 +297,9 @@ async def load_all_routers():
 
     from handlers.UserCommands.RPCommands import RP
     routers.append(RP)
+
+    from handlers.sanor_commands.CheckPremiumEmodji import CPE
+    routers.append(CPE)
 
     # Другие
     from handlers.testDirectiry.chat_settings import cs
@@ -310,8 +317,22 @@ async def load_all_routers():
     from handlers.testDirectiry.testing import SlechCommands
     routers.append(SlechCommands)
 
+
+
+    from handlers.AdminsTools.ChatSettings.first_comment.first_comment import first_comment_commands_router
+    routers.append(first_comment_commands_router)
+
+    from handlers.UserCommands.sapphire_commands import sapphire_commands
+    routers.append(sapphire_commands)
+
+    from handlers.testDirectiry.voice_decoding import decoding
+    routers.append(decoding)
+
     from handlers.AdminsTools.ChatSettings.captcha.captcha_main import captcha_router
     routers.append(captcha_router)
+
+    from handlers.AdminsTools.ChatSettings.first_comment.first_comment_auto import first_comment_auto_router
+    routers.append(first_comment_auto_router)
 
     return routers
 
@@ -355,7 +376,7 @@ async def initialize_services():
         # 6. Мониторинг пингов
         from handlers.BotAutomaticWork.Gonfig.multi_bot_config import MultiBotConfig
         from handlers.BotAutomaticWork.BotCreatedGlobal import get_bot_by_token
-        from handlers.AgentsFeatures.server_info import start_background_ping_monitor
+        from handlers.sanor_commands.server_info import start_background_ping_monitor
 
         bot_instances_by_id = {}
         for cfg in MultiBotConfig.BOTS:
@@ -419,7 +440,7 @@ async def shutdown_services():
             pass
 
         # 6. Мониторинг пингов
-        from handlers.AgentsFeatures.server_info import stop_background_ping_monitor
+        from handlers.sanor_commands.server_info import stop_background_ping_monitor
         stop_background_ping_monitor()
 
         # 7. Сервис статистики чатов
@@ -447,93 +468,157 @@ async def shutdown_services():
 
 
 async def run_bot_instance(bot_config: dict):
-
-
-
     """Запуск экземпляра бота"""
     bot_token = bot_config.get('TOKEN')
     bot_id = bot_config.get('id')
-    bot_name = bot_config.get('name')
+    bot_name = bot_config.get('name', 'Unknown')
 
     if not bot_token or not bot_id:
-        logger.error(f"❌ Некорректный конфиг: {bot_name}")
+        logger.error(f"❌ Некорректный конфиг: {bot_name} (token: {bool(bot_token)}, id: {bool(bot_id)})")
         return
 
+    bot = None
+    dp = None
+
     try:
-        logger.info(f"🚀 Подготовка бота: {bot_name}")
+        logger.info(f"🚀 Подготовка бота: {bot_name} [ID: {bot_id}]")
 
         # 1. Перезагрузка хендлеров
         await reload_all_handlers()
 
         # 2. Загрузка роутеров
         routers = await load_all_routers()
+        logger.info(f"📚 Загружено {len(routers)} роутеров для бота {bot_name}")
 
         # 3. Создание бота и диспетчера
         bot = Bot(
             token=bot_token,
             default=DefaultBotProperties(parse_mode='HTML')
         )
-
         dp = Dispatcher(storage=MemoryStorage())
 
-        ##asyncio.create_task(start_load_test(dp, bot))
+        # ===== MIDDLEWARE ДЛЯ ВСЕХ ОБНОВЛЕНИЙ =====
+        # ВАЖНО: Middleware регистрируются в порядке выполнения
+        # Первыми регистрируем middleware, которые должны обрабатывать ВСЕ сообщения
 
-        # 4. Регистрация middleware
-        from handlers.BotAutomaticWork.ActiveBotMiddleware import ActiveBotMiddleware
-        active_middleware = ActiveBotMiddleware(bot_id)
-        dp.update.middleware.register(active_middleware)
+        # 1. ActiveBotMiddleware (работает со всеми сообщениями)
+        try:
+            from handlers.BotAutomaticWork.ActiveBotMiddleware import ActiveBotMiddleware
+            dp.update.middleware.register(ActiveBotMiddleware(bot_id))
+            logger.debug(f"✅ ActiveBotMiddleware зарегистрирован для {bot_name}")
+        except ImportError as e:
+            logger.error(f"❌ Ошибка импорта ActiveBotMiddleware: {e}")
 
-        # === ИСПОЛЬЗУЕМ ОПТИМИЗИРОВАННЫЙ MIDDLEWARE ===
-        from handlers.BotAutomaticWork.Middleware.MiddlewareCore import UpdateChatUserMiddleware
-        update_user_middleware = UpdateChatUserMiddleware(bot_token)
-        dp.update.middleware.register(update_user_middleware)
+        # 2. UpdateChatUserMiddleware (работает со всеми сообщениями)
+        try:
+            from handlers.BotAutomaticWork.Middleware.MiddlewareCore import UpdateChatUserMiddleware
+            dp.update.middleware.register(UpdateChatUserMiddleware(bot_token))
+            logger.debug(f"✅ UpdateChatUserMiddleware зарегистрирован для {bot_name}")
+        except ImportError as e:
+            logger.error(f"❌ Ошибка импорта UpdateChatUserMiddleware: {e}")
 
-        # PerformanceMonitoringMiddleware теперь в отдельном файле
-        from handlers.BotAutomaticWork.Middleware.PerformanceMonitoringMiddleware import PerformanceMonitoringMiddleware
-        performance_middleware = PerformanceMonitoringMiddleware(alert_threshold=1.0)
-        dp.update.middleware.register(performance_middleware)
+        # 3. PerformanceMonitoringMiddleware (работает со всеми сообщениями)
+        try:
+            from handlers.BotAutomaticWork.Middleware.PerformanceMonitoringMiddleware import \
+                PerformanceMonitoringMiddleware
+            dp.update.middleware.register(PerformanceMonitoringMiddleware(alert_threshold=1.0))
+            logger.debug(f"✅ PerformanceMonitoringMiddleware зарегистрирован для {bot_name}")
+        except ImportError as e:
+            logger.error(f"❌ Ошибка импорта PerformanceMonitoringMiddleware: {e}")
 
-        # Глобальные счетчики
-        from handlers.BotAutomaticWork.Middleware.GlobalCountersMiddleware import GlobalCountersMiddleware
-        dp.update.middleware.register(GlobalCountersMiddleware())
-        # ===========================================
+        # 4. GlobalCountersMiddleware (работает со всеми сообщениями)
+        try:
+            from handlers.BotAutomaticWork.Middleware.GlobalCountersMiddleware import GlobalCountersMiddleware
+            dp.update.middleware.register(GlobalCountersMiddleware())
+            logger.debug(f"✅ GlobalCountersMiddleware зарегистрирован для {bot_name}")
+        except ImportError as e:
+            logger.error(f"❌ Ошибка импорта GlobalCountersMiddleware: {e}")
 
-        # 5. Регистрация роутеров
+        # ===== КРИТИЧЕСКИ ВАЖНО: ФИЛЬТР ПЕРЕСЛАННЫХ СООБЩЕНИЙ =====
+        # Этот middleware должен быть зарегистрирован ПОСЛЕ всех остальных middleware,
+        # но ДО регистрации роутеров, чтобы перехватывать сообщения до них
+
+        @dp.message.outer_middleware()  # Используем outer_middleware для сообщений
+        async def block_forwarded_messages(handler, message, data):
+            """
+            Middleware для БЛОКИРОВКИ пересланных сообщений.
+            - Пропускает только НЕпересланные сообщения к хендлерам
+            - Пересланные сообщения блокируются и НЕ доходят до роутеров
+            """
+
+            # Проверяем все возможные признаки пересланного сообщения
+            is_forwarded = any([
+                message.forward_date,
+                message.forward_from,
+                message.forward_from_chat,
+                message.forward_from_message_id,
+                message.forward_sender_name,
+                message.forward_signature
+            ])
+
+            if is_forwarded:
+                # Пересланное сообщение - блокируем (не передаем в handler)
+                logger.debug(f"🚫 Бот {bot_name}: пересланное сообщение ЗАБЛОКИРОВАНО (не передается в роутеры)")
+                return  # None = сообщение не обрабатывается дальше
+            else:
+                # Обычное сообщение - передаем в роутеры
+                logger.debug(f"✅ Бот {bot_name}: обычное сообщение передается в роутеры")
+                return await handler(message, data)
+
+        # ===== РЕГИСТРАЦИЯ РОУТЕРОВ =====
+        # Теперь роутеры получают ТОЛЬКО непересланные сообщения
         for router in routers:
             dp.include_router(router)
+            logger.debug(f"📎 Роутер {router.__class__.__name__} подключен к {bot_name}")
 
-        # 6. Информация о боте
+        # Дополнительная защита: можно добавить фильтр на уровне диспетчера
+        @dp.message(lambda message: any([
+            message.forward_date,
+            message.forward_from,
+            message.forward_from_chat,
+            message.forward_from_message_id,
+            message.forward_sender_name,
+            message.forward_signature
+        ]))
+        async def catch_all_forwarded(message):
+            """Финал: ловим все пересланные сообщения, которые каким-то чудом прошли"""
+            logger.warning(
+                f"⚠️ Бот {bot_name}: пересланное сообщение достигло финального хендлера! {message.text[:50]}")
+            # Не отправляем ответ
+
+        # 6. Получение информации о боте
         bot_info = await bot.get_me()
-        logger.info(f"🤖 Бот {bot_name} запущен как @{bot_info.username}")
+        logger.info(f"✅ Бот {bot_name} успешно запущен как @{bot_info.username}")
 
         # 7. Уведомление о запуске
         try:
             await bot.send_message(
                 chat_id=-1003346491683,
-                text=f'✅ Бот запущен!\n👤 @{bot_info.username}'
+                text=f'✅ Бот запущен!\n'
+                     f'👤 Имя: {bot_name}\n'
+                     f'🔗 Username: @{bot_info.username}\n'
+                     f'🆔 ID: {bot_id}'
             )
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось отправить уведомление о запуске: {e}")
 
         # 8. Запуск поллинга
         logger.info(f"🔄 Начинаю поллинг для {bot_name}...")
+
+        allowed_updates = ["message", "callback_query", "inline_query",
+                           "chat_member", "my_chat_member", "chat_join_request"]
+
         await dp.start_polling(
             bot,
             skip_updates=True,
-            allowed_updates=[
-                "message",
-                "callback_query",
-                "inline_query",
-                "chat_member",
-                "my_chat_member",
-                "chat_join_request"
-            ]
+            allowed_updates=allowed_updates
         )
 
     except Exception as e:
         logger.error(f"❌ Критическая ошибка в боте {bot_name}: {e}", exc_info=True)
+
     finally:
-        if 'bot' in locals():
+        if bot:
             await bot.session.close()
             logger.info(f"🔌 Бот {bot_name} остановлен")
 

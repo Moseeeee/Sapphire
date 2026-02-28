@@ -32,7 +32,7 @@ from handlers.BotAutomaticWork.SeasonsEmojiUtils import get_emoji
 from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 from handlers.BotAutomaticWork.universal_bot import bot
 
@@ -41,6 +41,7 @@ report = Router()
 report_cooldown = {}
 REPORT_COOLDOWN_MAX_TIME = 40
 
+logger = logging.getLogger(__name__)
 
 async def time_reported(user_id, chat_id, max_time=REPORT_COOLDOWN_MAX_TIME):
     current_time = time.time()
@@ -63,7 +64,7 @@ async def time_reported(user_id, chat_id, max_time=REPORT_COOLDOWN_MAX_TIME):
 
     report_cooldown[key] = current_time
     return True
-logger = logging.getLogger(__name__)
+
 
 async def time_reported(user_id, chat_id, max_time=40):
     current_time = time.time()
@@ -467,11 +468,11 @@ async def reports(msg: Message):
                 [
                     InlineKeyboardButton(
                         text="✅ Чек",
-                        callback_data=f"check:{msg.message_id}_{chat}"
+                        callback_data=f"check:{user_id}_{msg.message_id}_{chat}"
                     ),
                     InlineKeyboardButton(
                         text="➖ Игнор",
-                        callback_data=f"ignore:{msg.message_id}_{chat}"
+                        callback_data=f"ignore:{user_id}_{msg.message_id}_{chat}"
                     )
                 ]
             ])
@@ -587,7 +588,7 @@ async def ban_user_handler(callback: types.CallbackQuery):
 
     except Exception as e:
         await callback.answer(f"️ Произошла ошибка. Попробуйте позже", show_alert=True)
-        logging.error(e)
+        logger.error(e, exc_info=True)
 
 
 @report.callback_query(lambda c: c.data.startswith("del:"))

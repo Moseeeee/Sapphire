@@ -68,7 +68,6 @@ def parse_time_string(time_str: str) -> Optional[timedelta]:
 
     time_str = time_str.lower().strip()
 
-    # Обработка простых форм
     simple_units = {
         'минута': '1 мин', 'час': '1 ч', 'день': '1 д',
         'неделя': '1 н', 'месяц': '1 м', 'год': '1 г'
@@ -103,24 +102,19 @@ def parse_time_string(time_str: str) -> Optional[timedelta]:
         elif time_type == 'weeks':
             total_delta += timedelta(weeks=value)
         elif time_type == 'months':
-            total_delta += timedelta(days=value * 30)  # Ограничим 30 днями на месяц
+            total_delta += timedelta(days=value * 30)
         elif time_type == 'years':
-            # Ограничим 50 годами для предотвращения переполнения
             if value > 50:
                 value = 50
             total_delta += timedelta(days=value * 365)
-        # Убираем обработку веков, она вызывает переполнение
 
-    # Дополнительная проверка на максимальное значение
-    # Максимальное значение timedelta в Python примерно 999999999 дней
-    # Ограничим 36500 дней (100 лет)
     MAX_DAYS = 36500
     if total_delta.days > MAX_DAYS:
         total_delta = timedelta(days=MAX_DAYS)
 
     return total_delta
 
-# Специальные ключевые слова для времени
+
 SPECIAL_DURATIONS = {
     'навсегда': 'forever',
     'перманентно': 'forever',
@@ -137,26 +131,22 @@ SPECIAL_DURATIONS = {
 def parse_warn_duration(time_str: str) -> Optional[timedelta]:
     """Парсит строку времени для варна, возвращает None для навсегда."""
     if not time_str:
-        return None  # Используем по умолчанию
+        return None
 
     time_str = time_str.lower().strip()
 
-    # Проверяем специальные ключевые слова
     for keyword in SPECIAL_DURATIONS:
         if keyword in time_str:
-            return None  # None означает "навсегда"
+            return None
 
-    # Используем существующую функцию парсинга
     return parse_time_string(time_str)
 
 
 def get_moscow_datetime() -> datetime:
-    """Возвращает текущее время в московской таймзоне."""
     return datetime.now(MOSCOW_TZ)
 
 
 def ensure_moscow_time(dt: datetime) -> datetime:
-    """Обеспечивает, что datetime имеет московскую таймзону."""
     if dt.tzinfo is None:
         return MOSCOW_TZ.localize(dt)
     return dt.astimezone(MOSCOW_TZ)
@@ -173,24 +163,16 @@ async def get_column_types() -> dict:
                 AND column_name IN ('created_at', 'expires_at')
                 ORDER BY column_name;
             ''')
-            # Возвращаем словарь с результатами
             return {row['column_name']: row['data_type'] for row in result} if result else {}
     except Exception as e:
         logger.error(f"Error checking column types: {e}")
-        # Возвращаем пустой словарь вместо None
         return {}
 
 
 def prepare_datetime_for_db(dt: datetime, column_type: str) -> object:
-    """Подготавливает datetime для вставки в БД в зависимости от типа колонки."""
-    if not column_type:
-        # Если тип колонки не определен, используем timestamp
-        return dt
-
-    if column_type in ['timestamp with time zone', 'timestamp without time zone', 'timestamp']:
+    if not column_type or column_type in ['timestamp with time zone', 'timestamp without time zone', 'timestamp']:
         return dt
     else:
-        # Для TEXT и других типов преобразуем в строку
         return dt.isoformat()
 
 
@@ -199,7 +181,6 @@ def prepare_datetime_for_db(dt: datetime, column_type: str) -> object:
 # -------------------------
 
 async def get_default_warn_duration(chat_id: int) -> timedelta:
-    """Возвращает время действия варна (по умолчанию — неделя)."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -216,7 +197,6 @@ async def get_default_warn_duration(chat_id: int) -> timedelta:
 
 
 async def set_default_warn_duration(chat_id: int, duration_str: str) -> None:
-    """Устанавливает длительность варна по умолчанию."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -230,7 +210,6 @@ async def set_default_warn_duration(chat_id: int, duration_str: str) -> None:
 
 
 async def get_warn_action(chat_id: int) -> str:
-    """Возвращает действие при превышении лимита (ban/mute/kick)."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -245,7 +224,6 @@ async def get_warn_action(chat_id: int) -> str:
 
 
 async def set_warn_action(chat_id: int, action: str) -> None:
-    """Устанавливает действие при превышении лимита."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -259,7 +237,6 @@ async def set_warn_action(chat_id: int, action: str) -> None:
 
 
 async def get_warn_limit(chat_id: int) -> int:
-    """Возвращает лимит варнов (по умолчанию — 3)."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -274,7 +251,6 @@ async def get_warn_limit(chat_id: int) -> int:
 
 
 async def set_warn_limit(chat_id: int, limit: int) -> None:
-    """Устанавливает лимит варнов."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -288,7 +264,7 @@ async def set_warn_limit(chat_id: int, limit: int) -> None:
 
 
 # -------------------------
-# РАБОТА С ВАРНАМИ (универсальная версия)
+# РАБОТА С ВАРНАМИ
 # -------------------------
 
 async def add_warn(chat_id: int, user_id: int, admin_id: int, reason: str = "Не указана",
@@ -296,26 +272,17 @@ async def add_warn(chat_id: int, user_id: int, admin_id: int, reason: str = "Н�
     """Добавляет варн и возвращает новое количество активных варнов."""
     try:
         now = get_moscow_datetime()
-
-        # Определяем длительность варна
         if duration is None:
             duration = await get_default_warn_duration(chat_id)
 
-        # Если duration = None (навсегда), устанавливаем дату истечения очень далеко в будущем
         if duration is None:
-            # Устанавливаем дату истечения через 100 лет (по сути "навсегда")
-            expires_at = now + timedelta(days=36525)  # 100 лет
+            expires_at = now + timedelta(days=36525)  # ~100 лет
         else:
             expires_at = now + duration
 
-        # Получаем типы колонок
         column_types = await get_column_types()
-        created_type = column_types.get('created_at', 'text')
-        expires_type = column_types.get('expires_at', 'text')
-
-        # Подготавливаем значения для БД
-        created_value = prepare_datetime_for_db(now, created_type)
-        expires_value = prepare_datetime_for_db(expires_at, expires_type)
+        created_value = prepare_datetime_for_db(now, column_types.get('created_at', 'text'))
+        expires_value = prepare_datetime_for_db(expires_at, column_types.get('expires_at', 'text'))
 
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -330,8 +297,10 @@ async def add_warn(chat_id: int, user_id: int, admin_id: int, reason: str = "Н�
         return await get_user_warns_count(chat_id, user_id)
 
 
-async def remove_warn(chat_id: int, user_id: int, warn_id: Optional[int] = None) -> int:
-    """Удаляет варн: по номеру (1,2,3...) или последний."""
+async def remove_warn(chat_id: int, user_id: int, warn_number: Optional[int] = None) -> int:
+    """
+    Удаляет варн по относительному номеру (1, 2, 3...) или последний, если номер не указан.
+    """
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -339,26 +308,26 @@ async def remove_warn(chat_id: int, user_id: int, warn_id: Optional[int] = None)
             column_types = await get_column_types()
             now_value = prepare_datetime_for_db(now, column_types.get('expires_at', 'text'))
 
-            if warn_id:
-                # Получаем активные варны в порядке старшинства
-                rows = await conn.fetch('''
-                    SELECT id FROM warns 
-                    WHERE chat_id = $1 AND user_id = $2 AND expires_at > $3
-                    ORDER BY created_at ASC
-                ''', chat_id, user_id, now_value)
+            # Получаем все активные варны пользователя в порядке возрастания времени
+            rows = await conn.fetch('''
+                SELECT id FROM warns 
+                WHERE chat_id = $1 AND user_id = $2 AND expires_at > $3
+                ORDER BY created_at ASC
+            ''', chat_id, user_id, now_value)
 
-                if 1 <= warn_id <= len(rows):
-                    real_id = rows[warn_id - 1]['id']
+            if not rows:
+                return 0
+
+            if warn_number is not None:
+                if 1 <= warn_number <= len(rows):
+                    real_id = rows[warn_number - 1]['id']
                     await conn.execute('DELETE FROM warns WHERE id = $1', real_id)
+                else:
+                    return len(rows)  # Неверный номер — ничего не удаляем
             else:
-                # Удаляем самый свежий варн
-                await conn.execute('''
-                    DELETE FROM warns WHERE id = (
-                        SELECT id FROM warns 
-                        WHERE chat_id = $1 AND user_id = $2 AND expires_at > $3
-                        ORDER BY created_at DESC LIMIT 1
-                    )
-                ''', chat_id, user_id, now_value)
+                # Удаляем самый свежий (последний по времени)
+                last_id = rows[-1]['id']
+                await conn.execute('DELETE FROM warns WHERE id = $1', last_id)
 
         return await get_user_warns_count(chat_id, user_id)
     except Exception as e:
@@ -367,7 +336,6 @@ async def remove_warn(chat_id: int, user_id: int, warn_id: Optional[int] = None)
 
 
 async def get_user_warns_count(chat_id: int, user_id: int) -> int:
-    """Возвращает количество активных варнов."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -386,7 +354,10 @@ async def get_user_warns_count(chat_id: int, user_id: int) -> int:
 
 
 async def get_user_warns(chat_id: int, user_id: int) -> List[Tuple]:
-    """Возвращает список варнов с относительными ID."""
+    """
+    Возвращает список активных варнов пользователя.
+    Каждый элемент: (относительный_номер, admin_id, reason, created_at, expires_at, реальный_id_из_БД)
+    """
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -403,7 +374,6 @@ async def get_user_warns(chat_id: int, user_id: int) -> List[Tuple]:
 
             result = []
             for i, row in enumerate(rows, 1):
-                # Преобразуем значения в datetime если нужно
                 created_at = row['created_at']
                 expires_at = row['expires_at']
 
@@ -419,12 +389,10 @@ async def get_user_warns(chat_id: int, user_id: int) -> List[Tuple]:
                     except (ValueError, TypeError):
                         expires_at = get_moscow_datetime()
 
-                # Приводим к московскому времени
                 created_at = ensure_moscow_time(created_at)
                 expires_at = ensure_moscow_time(expires_at)
 
-                result.append((i, row['admin_id'], row['reason'],
-                               created_at, expires_at, row['id']))
+                result.append((i, row['admin_id'], row['reason'], created_at, expires_at, row['id']))
             return result
     except Exception as e:
         logger.error(e, exc_info=True)
@@ -432,7 +400,6 @@ async def get_user_warns(chat_id: int, user_id: int) -> List[Tuple]:
 
 
 async def get_all_warns(chat_id: int, offset: int = 0, limit: int = WARNS_PER_PAGE) -> List[Tuple]:
-    """Возвращает статистику по варнам (пользователи с количеством)."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -455,7 +422,6 @@ async def get_all_warns(chat_id: int, offset: int = 0, limit: int = WARNS_PER_PA
 
 
 async def get_total_warns_count(chat_id: int) -> int:
-    """Возвращает количество пользователей с активными варнами."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -474,7 +440,6 @@ async def get_total_warns_count(chat_id: int) -> int:
 
 
 async def get_warn_details(warn_id: int) -> Optional[Tuple]:
-    """Возвращает детали варна по ID."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -484,7 +449,6 @@ async def get_warn_details(warn_id: int) -> Optional[Tuple]:
                 WHERE id = $1
             ''', warn_id)
             if row:
-                # Обрабатываем даты
                 created_at = row['created_at']
                 expires_at = row['expires_at']
 
@@ -512,7 +476,6 @@ async def get_warn_details(warn_id: int) -> Optional[Tuple]:
 
 
 async def clear_user_warns(chat_id: int, user_id: int) -> None:
-    """Очищает все варны пользователя."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -522,7 +485,6 @@ async def clear_user_warns(chat_id: int, user_id: int) -> None:
 
 
 async def clear_expired_warns() -> None:
-    """Очищает истёкшие варны."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -535,7 +497,9 @@ async def clear_expired_warns() -> None:
 
 
 async def get_warn_relative_id(chat_id: int, user_id: int, real_warn_id: int) -> int:
-    """Возвращает относительный номер варна (1, 2, 3...)."""
+    """
+    Возвращает относительный номер варна (1, 2, 3...) по его реальному id из БД.
+    """
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:

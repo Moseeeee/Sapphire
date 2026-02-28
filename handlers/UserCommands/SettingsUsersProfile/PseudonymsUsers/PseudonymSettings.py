@@ -1,450 +1,337 @@
-from typing import Union
-import unicodedata
 import re
-import logging
-from typing import Tuple
 import html
-
+from typing import Union
+import logging
 
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 
-from handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovalsUtils import contains_links
-# Импорт для базы данных вынесен наверх
+from handlers.AdminsTools.ChatSettings.reports.reportsDB import search_user_name
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_with_pseudonym
+from handlers.BotAutomaticWork.users.links.clean_user_name import clean_name
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.emoji_utils import format_pseudonym_for_display
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_linkDB import search_username
 from handlers.UserCommands.SettingsUsersProfile.PseudonymsUsers.PseudonymSettingsDB import (
     validate_pseudonym,
     update_user_pseudonym, delete_user_pseudonym, get_user_pseudonym
 )
 
+
 PseudonymRouter = Router()
 
-import unicodedata
-import re
-import logging
-from typing import Tuple
-import html
+# Паттерны для проверки ссылок и юзернеймов
+URL_PATTERN = re.compile(
+    r'https?://(?:[-\w.]|%[\da-fA-F]{2})+|'  # http/https URLs
+    r'www\.[-\w.]+|'  # www URLs
+    r't\.me/[-\w.]+|'  # t.me links
+    r'@[a-zA-Z0-9_]{5,}'  # юзернеймы (@username)
+)
 
-# Константы для невидимых символов
-INVISIBLE_CHARS = {
-    # Zero-width characters
-    0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF,
-    # Zero-width joiner/non-joiner
-    0x200C, 0x200D,
-    # Invisible operators
-    0x2061, 0x2062, 0x2063, 0x2064,
-    # Bidirectional text control
-    0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
-    # Variation selectors
-    0xFE00, 0xFE01, 0xFE02, 0xFE03, 0xFE04, 0xFE05, 0xFE06, 0xFE07,
-    0xFE08, 0xFE09, 0xFE0A, 0xFE0B, 0xFE0C, 0xFE0D, 0xFE0E, 0xFE0F,
-    # Other invisible characters
-    0x00AD, 0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x17B5,
-    0x180E, 0x3164, 0xFFA0,
-}
+# Символы, которые могут сломать HTML
+HTML_DANGEROUS_CHARS = ['<', '>', '"', "'", '&', '`']
 
-# Deprecated и discouraged символы
-DEPRECATED_CHARS = {
-    0x1FFFE, 0x1FFFF, 0x2FFFE, 0x2FFFF, 0x3FFFE, 0x3FFFF,
-    0x4FFFE, 0x4FFFF, 0x5FFFE, 0x5FFFF, 0x6FFFE, 0x6FFFF,
-    0x7FFFE, 0x7FFFF, 0x8FFFE, 0x8FFFF, 0x9FFFE, 0x9FFFF,
-    0xAFFFE, 0xAFFFF, 0xBFFFE, 0xBFFFF, 0xCFFFE, 0xCFFFF,
-    0xDFFFE, 0xDFFFF, 0xEFFFE, 0xEFFFF, 0xFFFFE, 0xFFFFF,
-    0x10FFFE, 0x10FFFF,
-}
-
-# Символы, ломающие отображение
-BREAKING_CHARS = {
-    0x2028,  # Line separator
-    0x2029,  # Paragraph separator
-    0x000B,  # Vertical tab
-    0x000C,  # Form feed
-    0x0085,  # Next line
-}
+# Символы, которые могут сломать систему или вызвать проблемы
+BREAKING_SYMBOLS = [
+    '\x00',  # Null char
+    '\x07',  # Bell
+    '\x08',  # Backspace
+    '\x0b',  # Vertical tab
+    '\x0c',  # Form feed
+    '\x1b',  # Escape
+    '\x7f',  # Delete
+    '\u200b',  # Zero-width space
+    '\u200c',  # Zero-width non-joiner
+    '\u200d',  # Zero-width joiner
+    '\u202e',  # Right-to-left override
+    '\u202d',  # Left-to-right override
+    '\u2066',  # Left-to-right isolate
+    '\u2067',  # Right-to-left isolate
+    '\u2068',  # First strong isolate
+    '\u2069',  # Pop directional isolate
+    '\ufeff',  # Byte order mark
+]
 
 
-def validate_pseudonym(pseudonym: str) -> Tuple[bool, str]:
+def sanitize_text_for_storage(text: str) -> str:
     """
-    Улучшенная валидация псевдонима с расширенной защитой
+    Подготавливает текст для безопасного хранения.
+    Сохраняет премиум эмодзи, но экранирует опасные символы вне тегов эмодзи.
     """
-    if not pseudonym or not isinstance(pseudonym, str):
-        return False, "Псевдоним должен быть строкой"
+    # Сначала защищаем теги эмодзи
+    emoji_tags = []
 
-    # 1. Сохраняем оригинал для сравнения
-    original = pseudonym
+    # Находим и временно заменяем теги эмодзи
+    def protect_emoji(match):
+        emoji_tags.append(match.group(0))
+        return f'__EMOJI_TAG_{len(emoji_tags) - 1}__'
 
-    # 2. Нормализация Unicode (NFKC для объединения символов)
-    normalized = unicodedata.normalize('NFKC', pseudonym)
-
-    # 3. Удаление всех невидимых и управляющих символов
-    cleaned_chars = []
-    for char in normalized:
-        category = unicodedata.category(char)
-        char_ord = ord(char)
-
-        # Удаляем все управляющие символы
-        if category in ('Cc', 'Cf', 'Co', 'Cn'):
-            continue
-
-        # Удаляем невидимые символы
-        if char_ord in INVISIBLE_CHARS:
-            continue
-
-        # Проверяем на surrogate pairs
-        if 0xD800 <= char_ord <= 0xDFFF:
-            continue
-
-        # Проверяем на deprecated символы
-        if char_ord in DEPRECATED_CHARS:
-            continue
-
-        # Проверяем на символы, которые ломают отображение
-        if char_ord in BREAKING_CHARS:
-            continue
-
-        cleaned_chars.append(char)
-
-    cleaned = ''.join(cleaned_chars)
-
-    # 4. Проверка на пустоту после очистки
-    if not cleaned or not cleaned.strip():
-        return False, "Псевдоним не может быть пустым или состоять только из невидимых символов"
-
-    # 5. Удаление символов изменения направления текста
-    cleaned = remove_bidi_chars(cleaned)
-
-    # 6. Проверка длины
-    if len(cleaned) > 64:
-        return False, "Псевдоним слишком длинный (максимум 64 символа)"
-
-    if len(cleaned) < 1:
-        return False, "Псевдоним слишком короткий (минимум 1 символ)"
-
-    # 7. Проверка размера в байтах
-    try:
-        byte_size = len(cleaned.encode('utf-8'))
-        if byte_size > 128:
-            return False, "Псевдоним слишком большой"
-    except UnicodeError:
-        return False, "Некорректная кодировка символов"
-
-    # 8. Проверка на ссылки и упоминания
-    if contains_links(cleaned):
-        return False, "Псевдоним не может содержать ссылки или упоминания"
-
-    # 9. Проверка на опасные паттерны
-    dangerous_patterns = [
-        r'[<>{}|\\^~\[\]]',  # HTML/специальные символы
-        r'[\x00-\x1F\x7F]',  # Управляющие символы ASCII
-        r'[\uD800-\uDFFF]',  # Суррогатные пары
-        r'[\uE000-\uF8FF]',  # Приватная область Unicode
-        r'[\uFFF0-\uFFFF]',  # Специальные символы Unicode
-        r'^[_\-.]+$',  # Только специальные символы
-        r'[\u0000-\u0008\u000B\u000C\u000E-\u001F]',  # Доп. управляющие
-    ]
-
-    for pattern in dangerous_patterns:
-        if re.search(pattern, cleaned):
-            return False, "Псевдоним содержит запрещенные символы"
-
-    # 10. Проверка на эмодзи
-    emoji_info = count_emojis(cleaned)
-    if emoji_info['total'] > 2:
-        return False, "Слишком много эмодзи (максимум 2)"
-
-    # 11. Проверка на повторяющиеся специальные символы
-    if re.search(r'[-_\.!?,:;+*%$#@&\(\)"\']{3,}', cleaned):
-        return False, "Слишком много повторяющихся специальных символов"
-
-    # 12. Проверка на начало/конец специальными символами
-    special_chars = set('-_.,!?:;+*%$#@&()"\'')
-    if cleaned and (cleaned[0] in special_chars or cleaned[-1] in special_chars):
-        return False, "Псевдоним не может начинаться или заканчиваться специальными символами"
-
-    # 13. Проверка на допустимые символы (расширенная версия)
-    invalid_chars = []
-    for char in cleaned:
-        char_ord = ord(char)
-
-        # Разрешаем: обычные буквы, цифры, пробелы, разрешенные специальные символы
-        # И ТАКЖЕ стилизованные буквы (математические и др.)
-
-        # 1. Обычные латинские буквы (a-z, A-Z)
-        is_latin = ('a' <= char <= 'z' or 'A' <= char <= 'Z')
-
-        # 2. Обычные кириллические буквы
-        is_cyrillic = ('а' <= char <= 'я' or 'А' <= char <= 'Я' or char in ('ё', 'Ё'))
-
-        # 3. Цифры
-        is_digit = ('0' <= char <= '9')
-
-        # 4. Разрешенные специальные символы
-        is_special = (char in ' -_.,!?:;+*%$#@&()"\'')
-
-        # 5. Пробельные символы
-        is_space = char.isspace()
-
-        # 6. Стилизованные латинские буквы (математические и др.)
-        is_styled_latin = (
-            # Математические курсивные буквы
-                (0x1D434 <= char_ord <= 0x1D467) or  # Mathematical Italic
-                (0x1D468 <= char_ord <= 0x1D49B) or  # Mathematical Bold Italic
-                (0x1D49C <= char_ord <= 0x1D4CF) or  # Mathematical Script
-                (0x1D4D0 <= char_ord <= 0x1D503) or  # Mathematical Bold Script
-                (0x1D504 <= char_ord <= 0x1D537) or  # Mathematical Fraktur
-                (0x1D538 <= char_ord <= 0x1D56B) or  # Mathematical Double-struck
-                (0x1D56C <= char_ord <= 0x1D59F) or  # Mathematical Bold Fraktur
-                (0x1D5A0 <= char_ord <= 0x1D5D3) or  # Mathematical Sans-serif
-                (0x1D5D4 <= char_ord <= 0x1D607) or  # Mathematical Sans-serif Bold
-                (0x1D608 <= char_ord <= 0x1D63B) or  # Mathematical Sans-serif Italic
-                (0x1D63C <= char_ord <= 0x1D66F) or  # Mathematical Sans-serif Bold Italic
-                (0x1D670 <= char_ord <= 0x1D6A3) or  # Mathematical Monospace
-                # Дополнительные стилизованные символы
-                (0x1D400 <= char_ord <= 0x1D433) or  # Mathematical Bold
-                (0x1D6A8 <= char_ord <= 0x1D6E1) or  # Mathematical Bold Greek
-                (0x1D7CE <= char_ord <= 0x1D7FF)  # Mathematical Bold Digit
-        )
-
-        # 7. Стилизованные кириллические буквы (если есть)
-        is_styled_cyrillic = (
-            # Кириллица в расширенном диапазоне
-                (0x0400 <= char_ord <= 0x04FF) or  # Основная кириллица
-                (0x0500 <= char_ord <= 0x052F) or  # Расширенная кириллица
-                (0x2DE0 <= char_ord <= 0x2DFF) or  # Расширенная кириллица-A
-                (0xA640 <= char_ord <= 0xA69F)  # Расширенная кириллица-B
-        )
-
-        # Комбинируем все условия
-        is_valid = (
-                is_latin or
-                is_cyrillic or
-                is_digit or
-                is_special or
-                is_space or
-                is_styled_latin or
-                is_styled_cyrillic
-        )
-
-        if not is_valid:
-            # Проверяем, может быть это допустимая буква из других алфавитов
-            category = unicodedata.category(char)
-            if category.startswith('L'):  # Любая буква
-                is_valid = True
-            elif category in ('Nd', 'Nl', 'No'):  # Числа
-                is_valid = True
-            elif category in ('Zs', 'Zl', 'Zp'):  # Пробельные символы
-                is_valid = True
-
-        if not is_valid:
-            invalid_chars.append(char)
-            if len(invalid_chars) >= 3:
-                break
-
-    if invalid_chars:
-        invalid_chars_str = ', '.join([f"U+{ord(c):04X}" for c in invalid_chars[:3]])
-        return False, f"Содержит недопустимые символы: {invalid_chars_str}"
-
-    # 14. Проверка на моно-символы
-    chars_without_spaces = re.sub(r'\s', '', cleaned)
-    if len(chars_without_spaces) > 1 and len(set(chars_without_spaces)) == 1:
-        return False, "Псевдоним не может состоять из одного повторяющегося символа"
-
-    # 15. Очистка пробелов
-    cleaned = clean_whitespace(cleaned)
-
-    # 16. Проверка на запрещенные слова
-    if contains_forbidden_words(cleaned):
-        return False, "Псевдоним содержит запрещенные слова"
-
-    # 17. Проверка на валидность UTF-8
-    try:
-        cleaned.encode('utf-8')
-    except UnicodeError:
-        return False, "Некорректная кодировка символов"
-
-    # 18. Проверка, что очищенный псевдоним не пустой
-    if not cleaned or len(cleaned.strip()) < 1:
-        return False, "Псевдоним слишком короткий после очистки"
-
-    # 19. Проверка на слишком много специальных символов
-    special_count = sum(1 for c in cleaned if c in special_chars)
-    if special_count > len(cleaned) * 0.3:  # Не более 30% специальных символов
-        return False, "Слишком много специальных символов"
-
-    return True, cleaned
-
-
-def remove_bidi_chars(text: str) -> str:
-    """Удаляет символы изменения направления текста"""
-    bidi_chars = [
-        '\u202A', '\u202B', '\u202C', '\u202D', '\u202E',
-        '\u2066', '\u2067', '\u2068', '\u2069', '\u200F', '\u200E'
-    ]
-    for char in bidi_chars:
-        text = text.replace(char, '')
-    return text
-
-
-def count_emojis(text: str) -> dict:
-    """Считает эмодзи в тексте"""
-    emoji_pattern = re.compile(
-        "["
-        "\U0001F600-\U0001F64F"  # эмоции
-        "\U0001F300-\U0001F5FF"  # символы и пиктограммы
-        "\U0001F680-\U0001F6FF"  # транспорт и карты
-        "\U0001F1E0-\U0001F1FF"  # флаги
-        "\U00002702-\U000027B0"  # другие символы
-        "\U000024C2-\U0001F251"
-        "]+",
-        flags=re.UNICODE
+    # Защищаем теги эмодзи
+    protected_text = re.sub(
+        r'<tg-emoji emoji-id="\d+">[^<]*</tg-emoji>',
+        protect_emoji,
+        text
     )
 
-    emojis = emoji_pattern.findall(text)
-    return {
-        'total': len(emojis),
-        'emojis': emojis
-    }
+    # Экранируем HTML символы в оставшемся тексте
+    protected_text = html.escape(protected_text)
+
+    # Восстанавливаем теги эмодзи
+    for i, tag in enumerate(emoji_tags):
+        protected_text = protected_text.replace(f'__EMOJI_TAG_{i}__', tag)
+
+    return protected_text
 
 
-def clean_whitespace(text: str) -> str:
-    """Очищает пробелы в тексте"""
-    # Удаляем пробелы в начале и конце
-    text = text.strip()
+def check_breaking_symbols(text: str) -> tuple[bool, str]:
+    """Проверяет наличие ломающих символов"""
+    # Проверяем только текст вне тегов эмодзи
+    clean_text = re.sub(r'<tg-emoji emoji-id="\d+">[^<]*</tg-emoji>', '', text)
 
-    # Заменяем множественные пробелы на один
-    text = re.sub(r'\s{2,}', ' ', text)
-
-    # Удаляем пробелы вокруг некоторых специальных символов
-    text = re.sub(r'\s*([\-_\.!?,:;+*%$#@&\(\)"\'])\s*', r'\1', text)
-
-    return text
+    for symbol in BREAKING_SYMBOLS:
+        if symbol in clean_text:
+            return False, f"Обнаружен запрещенный символ: {repr(symbol)}"
+    return True, ""
 
 
-def contains_forbidden_words(text: str) -> bool:
-    """Проверяет наличие запрещенных слов"""
-    # Транслитерация стилизованных символов в обычные для проверки
-    import unicodedata
+def check_links_and_mentions(text: str) -> tuple[bool, str]:
+    """Проверяет наличие ссылок и упоминаний"""
+    # Удаляем теги эмодзи для проверки
+    clean_text = re.sub(r'<tg-emoji emoji-id="\d+">[^<]*</tg-emoji>', '', text)
 
-    # Нормализуем и преобразуем стилизованные символы в обычные
-    normalized = unicodedata.normalize('NFKD', text)
-    # Удаляем комбинирующие диакритические знаки
-    ascii_text = ''.join(c for c in normalized if not unicodedata.combining(c))
-
-    # Приводим к нижнему регистру для проверки
-    lower_text = ascii_text.lower()
-
-    # Список запрещенных слов (можно расширить)
-    forbidden_words = [
-        'admin', 'administrator', 'root', 'system', 'null', 'undefined',
-        'support', 'help', 'official', 'moderator', 'mod',
-        'http:', 'https:', 'www.', '.com', '.ru', '.org', '.net',
-        '@everyone', '@here', '@channel', '@all'
-    ]
-
-    for word in forbidden_words:
-        if word in lower_text:
-            return True
-
-    return False
+    if URL_PATTERN.search(clean_text):
+        return False, "Обнаружены ссылки или упоминания (@username)"
+    return True, ""
 
 
-def contains_links(text: str) -> bool:
-    """Проверяет наличие ссылок в тексте"""
-    # Транслитерация стилизованных символов в обычные для проверки
-    import unicodedata
+def extract_pseudonym_with_emoji(html_text: str) -> tuple[str, bool]:
+    """
+    Извлекает псевдоним из сообщения, сохраняя премиум эмодзи.
 
-    # Нормализуем и преобразуем стилизованные символы в обычные
-    normalized = unicodedata.normalize('NFKD', text)
-    # Удаляем комбинирующие диакритические знаки
-    ascii_text = ''.join(c for c in normalized if not unicodedata.combining(c))
+    Returns:
+        tuple: (псевдоним_с_эмодзи, содержит_ли_эмодзи)
+    """
+    # Разделяем на команду и псевдоним
+    parts = html_text.split(maxsplit=1)
+    if len(parts) < 2:
+        return "", False
 
-    lower_text = ascii_text.lower()
+    pseudonym = parts[1].strip()
 
-    link_patterns = [
-        r'https?://',
-        r'www\.',
-        r't\.me/',
-        r'@[\w]{5,}',
-        r'bit\.ly/',
-        r'tinyurl\.com/',
-        r'\.(com|ru|org|net|info|biz|xyz)',
-    ]
+    # Проверяем, содержит ли псевдоним эмодзи
+    has_emoji = bool(re.search(r'<tg-emoji emoji-id="\d+">[^<]*</tg-emoji>', pseudonym))
 
-    for pattern in link_patterns:
-        if re.search(pattern, lower_text):
-            return True
-    return False
+    return pseudonym, has_emoji
 
 
-# Улучшенная функция для обработки команды
+def get_text_length_without_premium_emoji(text: str) -> int:
+    """Возвращает длину текста без учета премиум эмодзи"""
+    # Удаляем теги премиум эмодзи
+    clean_text = re.sub(r'<tg-emoji emoji-id="\d+">[^<]*</tg-emoji>', '', text)
+    # Убираем пробелы для точного подсчета
+    return len(clean_text.strip())
+
+async def user_link_global(UserId: int) -> str:
+    try:
+        username = await search_username(UserId)
+        UserName = await search_user_name(UserId)
+        CleanName = clean_name(UserName)
+
+        # Определяем отображаемое имя с приоритетами
+        display_name = CleanName
+
+        if username:
+            return f"<a href='https://t.me/{username}'>{display_name}</a>"
+        else:
+            return f"<a href='tg://openmessage?user_id={UserId}'>{display_name}</a>"
+
+    except Exception as e:
+        return f"<a href='tg://openmessage?user_id={UserId}'>{UserId}</a>"
+
+
+async def user_link_with_pseudonym(user_id: int, chat_id: int) -> str:
+    """
+    Создает ссылку на пользователя с учетом псевдонима.
+    Извлекает премиум эмодзи, создает ссылку на оставшийся текст,
+    затем вставляет эмодзи обратно на их оригинальные позиции.
+    """
+    try:
+        # Получаем псевдоним пользователя в этом чате
+        pseudonym = await get_user_pseudonym(chat_id, user_id)
+
+        if pseudonym:
+            # Форматируем псевдоним с поддержкой эмодзи
+            display_text = format_pseudonym_for_display(pseudonym)
+            username = await search_username(user_id)
+
+            # Если есть премиум эмодзи
+            if '<tg-emoji' in display_text:
+                import re
+
+                # Находим все эмодзи и их позиции
+                emoji_pattern = r'(<tg-emoji[^>]*>.*?</tg-emoji>)'
+
+                # Разделяем текст на части: текст и эмодзи
+                parts = re.split(emoji_pattern, display_text)
+
+                # Собираем результат
+                result_parts = []
+
+                for part in parts:
+                    if not part:
+                        continue
+
+                    if part.startswith('<tg-emoji'):
+                        # Это эмодзи - добавляем как есть
+                        result_parts.append(part)
+                    else:
+                        # Это текст - делаем ссылку (если текст не пустой)
+                        if part.strip():
+                            if username:
+                                linked_text = f"<a href='https://t.me/{username}'>{part}</a>"
+                            else:
+                                linked_text = f"<a href='tg://openmessage?user_id={user_id}'>{part}</a>"
+                            result_parts.append(linked_text)
+                        else:
+                            # Пустой текст (пробелы между эмодзи)
+                            result_parts.append(part)
+
+                return ''.join(result_parts)
+            else:
+                # Нет эмодзи - обычная ссылка
+                if username:
+                    return f"<a href='https://t.me/{username}'>{display_text}</a>"
+                else:
+                    return f"<a href='tg://openmessage?user_id={user_id}'>{display_text}</a>"
+        else:
+            # Если нет псевдонима, используем стандартную функцию
+            return await user_link_global(user_id)
+
+    except Exception as e:
+        return await user_link_global(user_id)
+
+
 @PseudonymRouter.message(F.text.lower().startswith('+псевдоним'))
 @PseudonymRouter.message(F.text.lower().startswith('+ник'))
 @PseudonymRouter.message(F.text.lower().startswith('+nick'))
 async def set_pseudonym_command(message: Message):
-    """Установка псевдонима в чате"""
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-
+    """Установка псевдонима в чате с сохранением премиум эмодзи"""
+    # Убираем выполнение в личных сообщениях на самом начале
     if message.chat.type == 'private':
         return
 
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    # Проверка прав доступа
     if not await auto_check_AccessLevel_for_rang(user_id, chat_id, 68):
-        await message.reply("❌ У вас недостаточно прав для использования этой команды")
         return
 
-    # Получаем псевдоним из сообщения
-    command_text = message.text or ""
-    parts = command_text.split(maxsplit=1)
+    # Получаем текст сообщения с HTML разметкой
+    html_text = message.html_text or ""
 
-    if len(parts) < 2:
+    # Извлекаем псевдоним с сохранением эмодзи
+    pseudonym_html, has_emoji = extract_pseudonym_with_emoji(html_text)
+
+    # Валидация пустого псевдонима
+    if not pseudonym_html or pseudonym_html.strip() == "":
         await message.reply(
-            "ℹ️ Использование: <code>+псевдоним [ваш псевдоним]</code>\n"
-            "Пример: <code>+псевдоним Нео</code>",
+            f"Пример: <code>+псевдоним Нео</code> или с премиум эмодзи: <code>+псевдоним <tg-emoji emoji-id='5271552643322355356'>😀</tg-emoji>Нео</code>",
             parse_mode='HTML'
         )
         return
 
-    pseudonym = parts[1].strip()
+    # Получаем чистый текст без эмодзи для валидаций
+    clean_text = re.sub(r'<tg-emoji emoji-id="\d+">[^<]*</tg-emoji>', '', pseudonym_html).strip()
 
-    # Валидация псевдонима
-    is_valid, result = validate_pseudonym(pseudonym)
+    # Валидации с ранним возвратом
+    validation_checks = [
+        # 1. Проверка на ломающие символы
+        (lambda: check_breaking_symbols(pseudonym_html),
+         lambda result: result[0],
+         lambda result: f"❌ {result[1]}"),
 
-    if not is_valid:
-        await message.reply(f"❌ {result}", parse_mode='HTML')
-        return
+        # 2. Проверка на ссылки и @юзернеймы
+        (lambda: check_links_and_mentions(pseudonym_html),
+         lambda result: result[0],
+         lambda result: f"❌ {result[1]}"),
 
-    # Проверяем, были ли изменения после валидации
-    original_clean = re.sub(r'\s+', '', pseudonym)
-    result_clean = re.sub(r'\s+', '', result)
+        # 3. Проверка длины текста без учета премиум эмодзи
+        (lambda: get_text_length_without_premium_emoji(pseudonym_html),
+         lambda length: length > 0,
+         lambda
+             length: "❌ Псевдоним не может быть пустым" if length == 0 else f"❌ Псевдоним слишком длинный (максимум 32 символа без эмодзи, у вас {length})"),
 
-    if original_clean != result_clean:
-        # Показываем разницу
-        await message.reply(
-            "⚠️ Псевдоним был автоматически очищен:\n"
-            f"Было: <code>{html.escape(pseudonym[:50])}</code>\n"
-            f"Стало: <code>{html.escape(result)}</code>",
-            parse_mode='HTML'
+        # 4. Проверка максимальной длины
+        (lambda: get_text_length_without_premium_emoji(pseudonym_html),
+         lambda length: length <= 32,
+         lambda length: None),  # Сообщение уже в предыдущей проверке
+
+        # 5. Базовая валидация символов
+        (lambda: validate_pseudonym(clean_text),
+         lambda result: result[0],
+         lambda result: f"❌ {result[1]}")
+    ]
+
+    # Выполняем все проверки
+    for check_func, condition_func, error_func in validation_checks:
+        result = check_func()
+        if not condition_func(result):
+            error_msg = error_func(result)
+            if error_msg:
+                await message.reply(error_msg, parse_mode='HTML')
+            return
+
+    # Проверка на занятость псевдонима
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        existing_user = await conn.fetchrow(
+            '''
+            SELECT user_id FROM users_chats 
+            WHERE chat_id = $1 
+            AND pseudonym = $2 
+            AND user_id != $3
+            ''',
+            chat_id, pseudonym_html, user_id
         )
+
+        if existing_user:
+            display_name = await user_link_with_pseudonym(existing_user['user_id'], chat_id)
+            await message.reply(
+                f"❌ Псевдоним «{html.escape(clean_text)}» уже используется пользователем {display_name}",
+                parse_mode='HTML'
+            )
+            return
+
+    # Подготавливаем текст для хранения (сохраняем эмодзи, экранируем остальное)
+    safe_pseudonym = sanitize_text_for_storage(pseudonym_html)
 
     # Сохраняем псевдоним
     try:
-        await update_user_pseudonym(chat_id, user_id, result)
-        await message.reply(
-            f"✅ Псевдоним успешно установлен!\n",
-            parse_mode='HTML'
-        )
+        success = await update_user_pseudonym(chat_id, user_id, safe_pseudonym)
+
+        if not success:
+            await message.reply(
+                f"❌ Псевдоним «{html.escape(clean_text)}» уже используется другим пользователем",
+                parse_mode='HTML'
+            )
+            return
+
+        # Формируем ответ
+        if has_emoji:
+            # Показываем псевдоним с эмодзи
+            response = f"✅ Псевдоним «{safe_pseudonym}» установлен."
+        else:
+            response = f"✅ Псевдоним «{html.escape(clean_text)}» установлен."
+
+        await message.reply(response, parse_mode='HTML')
 
     except Exception as e:
-        logging.error(f"Ошибка при сохранении псевдонима: {e}", exc_info=True)
-        await message.reply(
-            "❌ Произошла ошибка при сохранении псевдонима. "
-        )
-
-
+        logging.error(f"Ошибка при сохранении псевдонима для user_id={user_id}, chat_id={chat_id}: {e}",
+                      exc_info=True)
+        await message.reply("❌ Произошла ошибка при сохранении псевдонима", parse_mode='HTML')
 
 
 @PseudonymRouter.message(F.text.lower().startswith('-псевдоним'))
@@ -460,7 +347,7 @@ async def remove_pseudonym_command(message: Message):
         return
 
     if not await auto_check_AccessLevel_for_rang(user_id, chat_id, 68):
-            return
+        return
 
     # Пытаемся удалить псевдоним
     success = await delete_user_pseudonym(chat_id, user_id)
@@ -475,7 +362,6 @@ async def remove_pseudonym_command(message: Message):
 @PseudonymRouter.message(F.text.lower().startswith('.мой псевдоним'))
 @PseudonymRouter.message(F.text.lower().startswith('/мой псевдоним'))
 @PseudonymRouter.message(F.text.lower().startswith('мой псевдоним'))
-
 @PseudonymRouter.message(F.text.lower().startswith('мой ник'))
 @PseudonymRouter.message(F.text.lower().startswith('!мой ник'))
 @PseudonymRouter.message(F.text.lower().startswith('.мой ник'))
@@ -494,8 +380,10 @@ async def get_my_pseudonym_command(message: Message):
     pseudonym = await get_user_pseudonym(chat_id, user_id)
 
     if pseudonym:
+        # Используем user_link_with_pseudonym для форматирования отображения
+        user_link = await user_link_with_pseudonym(user_id, chat_id)
         await message.reply(
-            f"👁️‍🗨️ Ваш псевдоним: <b>{pseudonym}</b>",
+            f"👁️‍🗨️ Ваш псевдоним: {user_link}",
             parse_mode='HTML'
         )
     else:
@@ -534,10 +422,6 @@ async def list_pseudonyms_command(message: Message):
 
     # Загружаем список псевдонимов (начинаем с 1 страницы)
     await show_pseudonyms_page(message, chat_id, page=1)
-
-
-
-
 
 
 async def show_pseudonyms_page(
@@ -600,7 +484,7 @@ async def show_pseudonyms_page(
 
             for i, row in enumerate(rows, start=start_num):
                 user_id = row['user_id']
-                # Используем user_link_with_pseudonym для создания ссылки на пользователя
+                # Используем функцию user_link_with_pseudonym для создания ссылки
                 user_link = await user_link_with_pseudonym(user_id, chat_id)
                 pseudonyms_list.append(f"{i}. {user_link}")
 
@@ -721,7 +605,6 @@ async def show_pseudonyms_page(
 @PseudonymRouter.callback_query(F.data.startswith("pseudos:"))
 @rate_limit_with_cleanup(limit=1)
 async def handle_pseudonyms_pagination(callback: CallbackQuery):
-
     if (not callback.message.reply_to_message or
             callback.from_user.id != callback.message.reply_to_message.from_user.id):
         random_text = get_random_text()

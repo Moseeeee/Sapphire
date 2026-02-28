@@ -10,7 +10,7 @@ from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.checks.user_online_status import get_user_status
-from handlers.BotAutomaticWork.users.links.users_global_link import user_link_global, user_link_with_pseudonym
+from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_with_pseudonym
 from handlers.BotAutomaticWork.users.usersDB import get_user_first_seen, get_user_full_data
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
@@ -93,7 +93,7 @@ async def check_user_profile(m: Message):
 
         # Собираем сообщение
         message_parts = [
-            f'{status} {UserLink}',
+            f'{UserLink} {status}',
             f'⏱️ Первое появление в боте: {date_str} ({time_ago})',
             f'{g("пол_эмод", gender)}Пол: {g("пол", gender)}'
         ]
