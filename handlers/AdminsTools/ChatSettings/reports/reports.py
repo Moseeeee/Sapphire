@@ -66,22 +66,6 @@ async def time_reported(user_id, chat_id, max_time=REPORT_COOLDOWN_MAX_TIME):
     return True
 
 
-async def time_reported(user_id, chat_id, max_time=40):
-    current_time = time.time()
-    key = (user_id, chat_id)
-
-    if key in report_cooldown:
-        last_time = report_cooldown[key]
-        elapsed_time = current_time - last_time
-
-        if elapsed_time < max_time:
-            return False
-
-
-    report_cooldown[key] = current_time
-    return True
-
-
 
 
 
@@ -104,30 +88,30 @@ async def add_db_chat(msg: Message):
         text = msg.text.strip().lower()
 
         if 'из' not in text:
-            await msg.answer("⚠️ Укажите чат после 'из'")
+            await msg.answer("⚠️ Укажите чат после команды")
             return
 
         _, reported_chat_str = text.split('из', 1)
         reported_chat_str = reported_chat_str.strip()
 
         if not reported_chat_str:
-            await msg.answer("❌ Не указан CHAT_ID")
+            await msg.answer("Не указан ид чата")
             return
 
         try:
             reported_chat = int(reported_chat_str)
         except ValueError:
-            await msg.answer("🚫 CHAT_ID должен быть числом (например: -100123456789)")
+            await msg.answer("CHAT_ID должен быть числом (например: -100123456789)")
             return
 
         # Проверяем права в чате-источнике репортов
         if not await auto_check_AccessLevel_for_rang(msg.from_user.id, reported_chat, 37):
-            await msg.answer("❌ У вас нет прав в указанном чате")
+            await msg.answer("У вас нет прав в указанном чате")
             return
 
         chat_title = await search_report_chat_name(reported_chat)
         if not chat_title:
-            await msg.answer("❌ Указанный чат не найден в базе данных")
+            await msg.answer("Указанный чат не найден в базе данных")
             return
 
         if reported_chat == report_chat:
@@ -135,11 +119,11 @@ async def add_db_chat(msg: Message):
             return
 
         if await is_reported_chat(report_chat):
-            await msg.answer("❌ Этот чат уже получает репорты из других чатов и не может быть источником репортов")
+            await msg.answer("Этот чат уже получает репорты из других чатов и не может быть источником репортов")
             return
 
         if await is_report_chat(reported_chat):
-            await msg.answer("❌ Указанный чат уже является чат-репортом и не может быть источником репортов")
+            await msg.answer("Указанный чат уже является чат-репортом и не может быть источником репортов")
             return
 
         if await check_existing_pair(report_chat, reported_chat):
@@ -148,14 +132,14 @@ async def add_db_chat(msg: Message):
 
         existing_reports = await check_report_chats(reported_chat)
         if existing_reports:
-            await msg.answer("❎ Этот чат уже отправляет репорты в другой чат")
+            await msg.answer("Этот чат уже отправляет репорты в другой чат")
             return
 
         # Проверка существования чата в базе
         chat_link = await search_report_chat_link(reported_chat)
 
         if not chat_title:
-            await msg.answer("❌ Указанный чат не найден в базе данных.\nУдалите и добавьте бота заново.")
+            await msg.answer("<b>Указанный чат не найден в базе данных.</b>\nУдалите и добавьте бота заново.")
             return
 
         chat = f"<a href='{chat_link}'>{chat_title}</a>" if chat_link else chat_title
@@ -205,7 +189,7 @@ async def all_del_db_chat(msg: Message):
                 disable_web_page_preview=True
             )
         else:
-            await msg.answer('📣 Нет привязанных чатов для удаления')
+            await msg.answer('Нет привязанных чатов для удаления')
 
     except Exception as e:
         logger.error(e, exc_info=True)
@@ -233,30 +217,30 @@ async def del_db_chat(msg: Message):
         text = msg.text.strip().lower()
 
         if 'из' not in text:
-            await msg.answer("⚠️ Укажите чат после 'из'")
+            await msg.answer("⚠️ Укажите чат после команды")
             return
 
         _, reported_chat_str = text.split('из', 1)
         reported_chat_str = reported_chat_str.strip()
 
         if not reported_chat_str:
-            await msg.answer("❌ Не указан CHAT_ID")
+            await msg.answer("Не указан чат ид")
             return
 
         try:
             reported_chat = int(reported_chat_str)
         except ValueError:
-            await msg.answer("🚫 CHAT_ID должен быть числом (например: -100123456789)")
+            await msg.answer("Чат ид должен быть числом (например: -100123456789)")
             return
 
         # Проверяем права в чате-источнике репортов
         if not await auto_check_AccessLevel_for_rang(msg.from_user.id, reported_chat, 37):
-            await msg.answer("❌ У вас нет прав в указанном чате")
+            await msg.answer("У вас нет прав в указанном чате")
             return
 
         chat_title = await search_report_chat_name(reported_chat)
         if not chat_title:
-            await msg.answer("❌ Указанный чат не найден в базе данных")
+            await msg.answer("Указанный чат не найден в базе данных")
             return
 
         if reported_chat == report_chat:
@@ -266,7 +250,7 @@ async def del_db_chat(msg: Message):
         if await del_chat_report(report_chat, reported_chat):
             await msg.answer("✅ Чат успешно отвязан")
         else:
-            await msg.answer('❌ Привязанный чат не найден')
+            await msg.answer('Привязанный чат не найден')
 
     except Exception as e:
         logger.error(e, exc_info=True)
@@ -289,7 +273,7 @@ async def show_linked_chats(msg: Message):
             return
 
         if not await is_report_chat(report_chat):
-            await msg.answer("❌ Этот чат не является чат-репортом")
+            await msg.answer("Этот чат не является чат-репортом")
             return
 
         pool = get_db_pool()
@@ -306,7 +290,7 @@ async def show_linked_chats(msg: Message):
                             for row in rows]
 
         if not linked_chats:
-            await msg.answer("📭 Нет привязанных чатов")
+            await msg.answer("Нет привязанных чатов")
             return
 
         message_lines = ["💬<b> Список привязанных чатов:</b>"]
@@ -350,6 +334,8 @@ async def show_linked_chats(msg: Message):
 @report.message(F.text.split("\n", 1)[0].lower() == '.жалоба')
 @report.message(F.text.split("\n", 1)[0].lower() == '/жалоба')
 @report.message(F.text.split("\n", 1)[0].lower() == 'сап жалоба')
+@report.message(F.text.split("\n", 1)[0].lower() == '@admin')
+@report.message(F.text.split("\n", 1)[0].lower() == '@admins')
 @report.message(Command("report"))
 async def reports(msg: Message):
         if msg.chat.type == 'private':
@@ -371,7 +357,7 @@ async def reports(msg: Message):
 
         try:
             if not reply_message:
-                return await msg.answer("❌ Эту команду нужно использовать в ответ на сообщение!")
+                return await msg.answer("Эту команду нужно использовать в ответ на сообщение!")
 
             user_id = reply_message.from_user.id
 
@@ -490,7 +476,7 @@ async def reports(msg: Message):
                 await msg.reply('Жалоба отправлена. Благодарим за помощь!')
             except Exception as e:
                 logger.error(e, exc_info=True)
-                await msg.answer(f"❌ <b>Ошибка при отправке репорта:</b>\n <blockquote>{e}</blockquote>")
+                await msg.answer(f"<b>Ошибка при отправке репорта:</b>\n <blockquote>{e}</blockquote>")
         except Exception as e:
             logger.error(e, exc_info=True)
             await msg.answer(f'⚠️ <b> Произошла ошибка.</b>\n <blockquote>{e}</blockquote>', parse_mode='HTML')
@@ -527,7 +513,7 @@ async def ban_user_handler(callback: types.CallbackQuery):
         admin_link = await user_link_global(callback.from_user.id)
         ban_text = (
             f"🚨 <b> <a href='https://t.me/c/{str(callback.message.chat.id)[4:]}/{callback_message}'>Жалоба проверена</a>! Пользователь забанен. ({user_id})</b>\n"
-            f"👮‍♂️ Модератор: {admin_link}"
+            f"Модератор: {admin_link}"
         )
 
         # ОБНОВЛЯЕМ СТАТИСТИКУ
@@ -770,27 +756,27 @@ async def _report_handler(callback: types.CallbackQuery):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🔇 1 час",
+                    text="1 час",
                     callback_data=f"mutetime:{user_id}_{msg_id}_{chat_id}_3600"
                 ),
                 InlineKeyboardButton(
-                    text="🔇 1 день",
+                    text="1 день",
                     callback_data=f"mutetime:{user_id}_{msg_id}_{chat_id}_86400"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🔇 1 неделя",
+                    text="1 неделя",
                     callback_data=f"mutetime:{user_id}_{msg_id}_{chat_id}_604800"
                 ),
                 InlineKeyboardButton(
-                    text="🔇 1 месяц",
+                    text="1 месяц",
                     callback_data=f"mutetime:{user_id}_{msg_id}_{chat_id}_2592000"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🔇 Навсегда",
+                    text="Навсегда",
                     callback_data=f"mutetime:{user_id}_{msg_id}_{chat_id}_0"
                 )
             ],
@@ -901,8 +887,8 @@ async def _mute_time_handler(callback: types.CallbackQuery):
 
                 await callback.message.edit_text(
                     f"✅ {admin_link} замутил {user_link} на {result}\n"
-                    f"📝 Причина: {reason}\n"
-                    f"⏰ Время: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n",
+                    f"Причина: {reason}\n"
+                    f"Время: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n",
                     parse_mode='HTML',
                     disable_web_page_preview=True,
                     reply_markup=keyboard
@@ -921,7 +907,7 @@ async def _mute_time_handler(callback: types.CallbackQuery):
 
                     mute_notification = (
                         f"👤 Пользователь {user_link} был заглушен администратором {admin_link}\n"
-                        f"📝 Причина: {reason}\n"
+                        f"Причина: {reason}\n"
                     )
 
                     await bot.send_message(
@@ -1025,8 +1011,8 @@ async def _back_to_report_handler(callback: types.CallbackQuery):
         # Формируем текст
         original_text = (
             f"\n<b> Новая жалоба из {chat_name}</b>\n\n"
-            f"👤 На пользователя: {user_link}\n"
-            f"📢 От: {reporter_link}"
+            f"На пользователя: {user_link}\n"
+            f"От: {reporter_link}"
         )
 
         # Добавляем причину, если она есть

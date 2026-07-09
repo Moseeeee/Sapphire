@@ -65,12 +65,12 @@ async def check_command_for_bd_int(command_id: int) -> Optional[int]:
 
 
 async def check_command_for_bd_str(command_name: str) -> Optional[int]:
-    """Проверяет существование команды по имени."""
+    """Проверяет существование команды по имени (регистронезависимо)."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                'SELECT CommandId FROM commands WHERE CommandName = $1',
+                'SELECT CommandId FROM commands WHERE LOWER(CommandName) = LOWER($1)',
                 command_name
             )
             return row['commandid'] if row else None
@@ -80,7 +80,7 @@ async def check_command_for_bd_str(command_name: str) -> Optional[int]:
 
 
 async def get_command_info(command_id: Optional[int] = None, command_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """Получает информацию о команде по ID или имени."""
+    """Получает информацию о команде по ID или имени (регистронезависимо)."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -91,7 +91,7 @@ async def get_command_info(command_id: Optional[int] = None, command_name: Optio
                 )
             elif command_name is not None:
                 row = await conn.fetchrow(
-                    'SELECT CommandId, CommandName, AccessLevel, UnderSectionId FROM commands WHERE CommandName = $1',
+                    'SELECT CommandId, CommandName, AccessLevel, UnderSectionId FROM commands WHERE LOWER(CommandName) = LOWER($1)',
                     command_name
                 )
             else:
@@ -136,7 +136,7 @@ async def get_commands_by_section(section_id: int) -> List[Dict[str, Any]]:
 
 
 async def get_section_info(section_id: Optional[int] = None, section_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """Получает информацию о разделе."""
+    """Получает информацию о разделе (регистронезависимо)."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -147,7 +147,7 @@ async def get_section_info(section_id: Optional[int] = None, section_name: Optio
                 )
             elif section_name is not None:
                 row = await conn.fetchrow(
-                    'SELECT SectionId, SectionName FROM sections WHERE SectionName = $1',
+                    'SELECT SectionId, SectionName FROM sections WHERE LOWER(SectionName) = LOWER($1)',
                     section_name
                 )
             else:
@@ -221,7 +221,6 @@ async def get_under_section_info(
                     params.append(section_id)
                 row = await conn.fetchrow(query, *params)
             else:
-                # Поиск по именам
                 if under_section_name and section_name:
                     row = await conn.fetchrow('''
                         SELECT us.UnderSectionId, us.UnderName, us.SectionId, s.SectionName 
@@ -320,7 +319,6 @@ async def get_under_sections_by_section(section_id: int) -> List[Dict[str, Any]]
 async def get_command_access_level(chat_id: int, command_id: int) -> int:
     """Получает уровень доступа команды с приоритетом для чата."""
     try:
-        # Сначала проверяем настройки чата
         pool = get_db_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -330,12 +328,11 @@ async def get_command_access_level(chat_id: int, command_id: int) -> int:
             if row:
                 return row['accesslevel']
 
-        # Затем — глобальные настройки
         command_info = await get_command_info(command_id=command_id)
         if command_info:
             return command_info['AccessLevel']
 
-        return 6  # По умолчанию: отключено
+        return 6
     except Exception as e:
         logger.error(e, exc_info=True)
         return 6

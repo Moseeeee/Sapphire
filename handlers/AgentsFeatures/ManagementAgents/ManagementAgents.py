@@ -19,7 +19,7 @@ from handlers.AgentsFeatures.ManagementAgents.ManagementAgentsDB import (
 )
 from handlers.BotAutomaticWork.universal_bot import bot
 from handlers.BotAutomaticWork.users.GenderUtils import g
-from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
+from handlers.BotAutomaticWork.users.checks.check_UserId.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 

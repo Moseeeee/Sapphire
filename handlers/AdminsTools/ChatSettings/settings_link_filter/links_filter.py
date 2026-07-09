@@ -1333,8 +1333,7 @@ async def set_link_action_cmd(message: Message):
 
     await message.answer(
         f"✅ <b>Действие обновлено!</b>\n\n"
-        f"При обнаружении запрещенных ссылок будет применяться: <b>{action_names[action_map[action]]}</b>\n\n"
-        f"ℹ️ Чтобы изменить действие, используйте команду снова.",
+        f"При обнаружении запрещенных ссылок будет применяться: <b>{action_names[action_map[action]]}</b>",
         parse_mode="HTML"
     )
 

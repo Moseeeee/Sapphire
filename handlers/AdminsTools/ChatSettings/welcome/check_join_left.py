@@ -128,7 +128,7 @@ async def handle_join(event: ChatMemberUpdated):
         else:
             if captcha_enabled:
                 welcome_msg = f"👋 Добро пожаловать, {user_link}!"
-                welcome_msg += "\n\n⚠️ <b>В чате установлена капча, пройдите её чтобы общаться в чате.</b>"
+                welcome_msg += "\n<b>В чате установлена капча, пройдите её чтобы общаться в чате.</b>"
 
                 await bot.send_message(
                     chat_id=chat_id,

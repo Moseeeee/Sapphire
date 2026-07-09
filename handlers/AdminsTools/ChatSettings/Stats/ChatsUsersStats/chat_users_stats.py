@@ -32,7 +32,7 @@ async def participants_info_period(message: types.Message):
     parts = message.text.lower().split()
     # Ожидаем как минимум 2 слова: "!участники инфо"
     if len(parts) < 2:
-        await message.answer("❌ Некорректная команда.")
+        await message.answer("Некорректная команда.")
         return
 
     # По умолчанию — день
@@ -44,7 +44,7 @@ async def participants_info_period(message: types.Message):
         period = "всего" if period_input in ("вся", "всего") else period_input
 
     if period not in {'день', 'неделя', 'месяц', 'год', 'всего'}:
-        await message.answer("❌ Неверный период. Используйте: день, неделя, месяц, год, всего")
+        await message.answer("Неверный период. Используйте: день, неделя, месяц, год, всего")
         return
 
     result = await get_period_stats(message.chat.id, period)

@@ -394,14 +394,14 @@ async def get_my_pseudonym_command(message: Message):
         )
 
 
-@PseudonymRouter.message(F.text.lower().startswith('!псевдонимы'))
-@PseudonymRouter.message(F.text.lower().startswith('/псевдонимы'))
-@PseudonymRouter.message(F.text.lower().startswith('.псевдонимы'))
-@PseudonymRouter.message(F.text.lower().startswith('псевдонимы'))
-@PseudonymRouter.message(F.text.lower().startswith('!ники'))
-@PseudonymRouter.message(F.text.lower().startswith('/ники'))
-@PseudonymRouter.message(F.text.lower().startswith('.ники'))
-@PseudonymRouter.message(F.text.lower().startswith('ники'))
+@PseudonymRouter.message(F.text.split("\n", 1)[0].lower() == '!псевдонимы')
+@PseudonymRouter.message(F.text.split("\n", 1)[0].lower() == '/псевдонимы')
+@PseudonymRouter.message(lambda m: m.text and m.text.lower().startswith('.псевдонимы'))
+@PseudonymRouter.message(lambda m: m.text and m.text.lower().startswith('псевдонимы'))
+@PseudonymRouter.message(lambda m: m.text and m.text.lower().startswith('!ники'))
+@PseudonymRouter.message(lambda m: m.text and m.text.lower().startswith('/ники'))
+@PseudonymRouter.message(lambda m: m.text and m.text.lower().startswith('.ники'))
+@PseudonymRouter.message(lambda m: m.text and m.text.lower().startswith('ники'))
 @PseudonymRouter.message(Command("pseudonyms"))
 async def list_pseudonyms_command(message: Message):
     """Список всех псевдонимов в чате (только для админов)"""

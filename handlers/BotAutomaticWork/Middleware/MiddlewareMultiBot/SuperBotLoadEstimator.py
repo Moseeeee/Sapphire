@@ -7,6 +7,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 # ============================================================================
 # КЛАСС: СБОР ВНУТРЕННИХ МЕТРИК БОТА
 # ============================================================================
@@ -17,9 +18,9 @@ class BotInternalMetrics:
         # Хранит: timestamp -> метрика
         # maxlen = 20 → среднее за последние ~2 секунды (при 10 замерах/сек)
         self.handler_times = deque(maxlen=20)  # время обработки хендлера
-        self.db_times = deque(maxlen=20)       # время БД
-        self.api_calls = deque(maxlen=20)      # вызовы API
-        self.transactions = deque(maxlen=20)   # транзакции БД
+        self.db_times = deque(maxlen=20)  # время БД
+        self.api_calls = deque(maxlen=20)  # вызовы API
+        self.transactions = deque(maxlen=20)  # транзакции БД
         self.last_activity_time = time.time()  # время последней активности
 
     def record_handler_time(self, duration_ms: float):
@@ -43,29 +44,36 @@ class BotInternalMetrics:
             self.last_activity_time = time.time()
 
     def get_current_metrics(self) -> Dict[str, float]:
+        # Копируем данные под блокировкой
         with self.lock:
-            # Считаем средние за последние 20 точек (или меньше, если нет)
-            avg_handler_time = statistics.mean(list(self.handler_times)) if self.handler_times else 0
-            avg_db_time = statistics.mean(list(self.db_times)) if self.db_times else 0
-            # API вызовы в секунду: за последние 20 временных точек
-            if self.api_calls:
-                time_span = time.time() - min(self.api_calls)
-                api_calls_per_sec = len(self.api_calls) / time_span if time_span > 0 else 0
-            else:
-                api_calls_per_sec = 0
+            handler_times_copy = list(self.handler_times)
+            db_times_copy = list(self.db_times)
+            api_calls_copy = list(self.api_calls)
+            transactions_copy = list(self.transactions)
 
-            if self.transactions:
-                time_span = time.time() - min(self.transactions)
-                db_transactions_per_sec = len(self.transactions) / time_span if time_span > 0 else 0
-            else:
-                db_transactions_per_sec = 0
+        # Вычисления вне блокировки для повышения производительности
+        # Используем медиану вместо среднего для устойчивости к выбросам
+        avg_handler_time = statistics.median(handler_times_copy) if handler_times_copy else 0
+        avg_db_time = statistics.median(db_times_copy) if db_times_copy else 0
 
-            return {
-                "avg_handler_time_ms": avg_handler_time,
-                "avg_db_time_ms": avg_db_time,
-                "api_calls_per_sec": api_calls_per_sec,
-                "db_transactions_per_sec": db_transactions_per_sec
-            }
+        # Увеличиваем окно для более точных расчётов частоты (3 секунды)
+        time_window = 3.0  # секунд
+        current_time = time.time()
+
+        # Считаем API вызовы за фиксированное окно времени
+        recent_api_calls = [t for t in api_calls_copy if current_time - t <= time_window]
+        api_calls_per_sec = len(recent_api_calls) / time_window if recent_api_calls else 0
+
+        # Аналогично для транзакций
+        recent_transactions = [t for t in transactions_copy if current_time - t <= time_window]
+        db_transactions_per_sec = len(recent_transactions) / time_window if recent_transactions else 0
+
+        return {
+            "avg_handler_time_ms": avg_handler_time,
+            "avg_db_time_ms": avg_db_time,
+            "api_calls_per_sec": api_calls_per_sec,
+            "db_transactions_per_sec": db_transactions_per_sec
+        }
 
 
 # ============================================================================
@@ -93,15 +101,24 @@ class BotLoadHistory:
         with self.lock:
             return [(ts, load, m) for ts, load, m in self.history if ts >= cutoff]
 
+    def _get_empty_stats(self) -> Dict[str, float]:
+        """Возвращает пустую статистику"""
+        return {
+            "avg_load": 0.0, "min_load": 0.0, "max_load": 0.0, "trend_load": 0.0,
+            "avg_handler_time": 0.0, "avg_db_time": 0.0,
+            "avg_api_calls_per_sec": 0.0, "avg_db_transactions_per_sec": 0.0
+        }
+
     def get_stats_for_last_minutes(self, minutes: int) -> Dict[str, float]:
-        """Получить статистику нагрузки за последние N минут"""
+        """Получить статистику нагрузки за последние N минут с весовыми коэффициентами"""
         points = self.get_last_minutes(minutes)
         if not points:
-            return {
-                "avg_load": 0.0, "min_load": 0.0, "max_load": 0.0, "trend_load": 0.0,
-                "avg_handler_time": 0.0, "avg_db_time": 0.0,
-                "avg_api_calls_per_sec": 0.0, "avg_db_transactions_per_sec": 0.0
-            }
+            return self._get_empty_stats()
+
+        # Создаём веса: более новые точки имеют больший вес (линейное увеличение)
+        weights = [i + 1 for i in range(len(points))]
+        total_weight = sum(weights)
+        weights = [w / total_weight for w in weights]
 
         # Распаковка
         loads = [load for _, load, _ in points]
@@ -110,19 +127,35 @@ class BotLoadHistory:
         avg_api_calls = [m["api_calls_per_sec"] for _, _, m in points]
         avg_db_trans = [m["db_transactions_per_sec"] for _, _, m in points]
 
-        # Основные метрики
-        avg_load = statistics.mean(loads)
+        # Средневзвешенные значения
+        avg_load = sum(l * w for l, w in zip(loads, weights))
         min_load = min(loads)
         max_load = max(loads)
-        first_load = points[0][1]
-        last_load = points[-1][1]
-        trend_load = last_load - first_load
 
-        # Средние метрики
-        avg_handler_time = statistics.mean(avg_handler_times)
-        avg_db_time = statistics.mean(avg_db_times)
-        avg_api_calls_per_sec = statistics.mean(avg_api_calls)
-        avg_db_transactions_per_sec = statistics.mean(avg_db_trans)
+        # Более точный расчёт тренда через линейную регрессию
+        if len(points) > 1:
+            x = list(range(len(points)))
+            y = loads
+            n = len(x)
+            # Линейная регрессия
+            sum_x = sum(x)
+            sum_y = sum(y)
+            sum_xy = sum(x_i * y_i for x_i, y_i in zip(x, y))
+            sum_x2 = sum(x_i ** 2 for x_i in x)
+
+            if (n * sum_x2 - sum_x ** 2) != 0:
+                slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x ** 2)
+                trend_load = slope * len(points)  # Общее изменение за период
+            else:
+                trend_load = 0.0
+        else:
+            trend_load = 0.0
+
+        # Средние метрики (простые средние)
+        avg_handler_time = statistics.mean(avg_handler_times) if avg_handler_times else 0
+        avg_db_time = statistics.mean(avg_db_times) if avg_db_times else 0
+        avg_api_calls_per_sec = statistics.mean(avg_api_calls) if avg_api_calls else 0
+        avg_db_transactions_per_sec = statistics.mean(avg_db_trans) if avg_db_trans else 0
 
         return {
             "avg_load": avg_load,
@@ -166,29 +199,24 @@ class SuperBotLoadEstimator:
 
     def _calculate_internal_load(self, metrics: Dict[str, float]) -> float:
         """Рассчитывает нагрузку на основе внутренних метрик"""
-        load = 0.0
-
+        # Используем более плавные формулы с оптимизированными порогами
         # 1. Время обработки хендлера (влияние: 40%)
-        # Если хендлер работает > 1000ms — это критично
-        handler_time_load = min(40, (metrics["avg_handler_time_ms"] / 1000) * 40)
-        load += handler_time_load
+        # Оптимизированный порог: 800ms вместо 1000ms для более раннего реагирования
+        handler_load = min(40, (metrics["avg_handler_time_ms"] / 800) * 40)
 
         # 2. Время БД (влияние: 30%)
-        # Если БД тормозит > 500ms — это критично
-        db_time_load = min(30, (metrics["avg_db_time_ms"] / 500) * 30)
-        load += db_time_load
+        # Оптимизированный порог: 400ms вместо 500ms
+        db_load = min(30, (metrics["avg_db_time_ms"] / 400) * 30)
 
         # 3. API вызовы (влияние: 20%)
-        # Если > 10 вызовов/сек — бот "болтается"
-        api_load = min(20, (metrics["api_calls_per_sec"] / 10) * 20)
-        load += api_load
+        # Оптимизированный порог: 8 вызовов/сек вместо 10
+        api_load = min(20, (metrics["api_calls_per_sec"] / 8) * 20)
 
         # 4. Транзакции БД (влияние: 10%)
-        # Если > 5 транзакций/сек — бот "пишет много"
-        db_trans_load = min(10, (metrics["db_transactions_per_sec"] / 5) * 10)
-        load += db_trans_load
+        # Оптимизированный порог: 4 транзакции/сек вместо 5
+        db_trans_load = min(10, (metrics["db_transactions_per_sec"] / 4) * 10)
 
-        return min(100, load)
+        return min(100, handler_load + db_load + api_load + db_trans_load)
 
     def calculate_bot_load(self, bot_id: str) -> float:
         """Рассчитывает супер точную нагрузку бота (0–100%)"""
@@ -214,6 +242,15 @@ class SuperBotLoadEstimator:
         """Получить текущую нагрузку бота"""
         history = self._get_history(bot_id)
         return history.get_current_load()
+
+    def get_load_level(self, load_percent: float) -> str:
+        """Определяет уровень нагрузки"""
+        if load_percent < 30:
+            return "low"
+        elif load_percent < 70:
+            return "medium"
+        else:
+            return "high"
 
     async def estimate_all_loads(self) -> Dict[str, float]:
         """Получить нагрузки всех ботов"""

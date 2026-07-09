@@ -21,7 +21,7 @@ async def on_push(m: Message):
     push_status = 'on'
     await edit_push_status(ChatId, push_status)
 
-    await m.answer('Уведы были включены')
+    await m.answer('Уведомления о доступе команд были включены')
 
 
 @PushCommandSettings.message(F.text.split("\n", 1)[0].lower() == '-уведы о доступе')
@@ -36,4 +36,4 @@ async def off_push(m: Message):
 
     push_status = 'off'
     await edit_push_status(ChatId, push_status)
-    await m.answer('Уведы были выключены')
+    await m.answer('Уведомления о доступе команд были выключены')

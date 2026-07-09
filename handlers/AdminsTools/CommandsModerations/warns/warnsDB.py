@@ -1,3 +1,4 @@
+
 import logging
 import re
 from typing import Optional, List, Tuple
@@ -300,6 +301,7 @@ async def add_warn(chat_id: int, user_id: int, admin_id: int, reason: str = "Н�
 async def remove_warn(chat_id: int, user_id: int, warn_number: Optional[int] = None) -> int:
     """
     Удаляет варн по относительному номеру (1, 2, 3...) или последний, если номер не указан.
+    Возвращает НОВОЕ количество активных варнов после удаления.
     """
     try:
         pool = get_db_pool()
@@ -323,16 +325,23 @@ async def remove_warn(chat_id: int, user_id: int, warn_number: Optional[int] = N
                     real_id = rows[warn_number - 1]['id']
                     await conn.execute('DELETE FROM warns WHERE id = $1', real_id)
                 else:
-                    return len(rows)  # Неверный номер — ничего не удаляем
+                    # Неверный номер — возвращаем текущее количество (ничего не удалили)
+                    return len(rows)
             else:
                 # Удаляем самый свежий (последний по времени)
                 last_id = rows[-1]['id']
                 await conn.execute('DELETE FROM warns WHERE id = $1', last_id)
 
+        # Возвращаем НОВОЕ количество варнов ПОСЛЕ удаления
         return await get_user_warns_count(chat_id, user_id)
+
     except Exception as e:
         logger.error(e, exc_info=True)
-        return await get_user_warns_count(chat_id, user_id)
+        # В случае ошибки пытаемся вернуть текущее количество
+        try:
+            return await get_user_warns_count(chat_id, user_id)
+        except:
+            return 0
 
 
 async def get_user_warns_count(chat_id: int, user_id: int) -> int:

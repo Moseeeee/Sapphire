@@ -3,6 +3,7 @@ from typing import Tuple, Optional
 import logging
 import pytz
 
+from BotAutomaticWork.Middleware.SmartIntRefreshed import SmartInt
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 
 logger = logging.getLogger(__name__)
@@ -221,13 +222,17 @@ def _format_stats_message(period: str, joined: int, left: int, kicked: int,
     }
 
     period_text = period_names[period]
-    net_change = joined - (left + kicked)
+    net_change = SmartInt(joined - (left + kicked))
+
+    left_int = SmartInt(left)
+    kicked_int = SmartInt(kicked)
+    joined_int = SmartInt(joined)
 
     result_message = (
         f"👥 <b>Информация о пользователях {period_text}:</b>\n"
-        f"<blockquote>Вступивших: {joined}\n"
-        f"Вышедших: {left}\n"
-        f"Забаненных: {kicked}</blockquote>\n\n"
+        f"<blockquote>Вступивших: {joined_int}\n"
+        f"Вышедших: {left_int}\n"
+        f"Забаненных: {kicked_int}</blockquote>\n\n"
     )
 
     if net_change > 0:

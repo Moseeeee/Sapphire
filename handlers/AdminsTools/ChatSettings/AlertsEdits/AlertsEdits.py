@@ -18,7 +18,7 @@ async def edit_status_v_on(m: Message):
     chat_id = m.chat.id
     status_v = "yes"
     await edit_status_v(chat_id, status_v)
-    await m.answer('✅ Уведомления о входе включены')
+    await m.answer('Уведомления о входе включены')
 
 @alerts.message(F.text.split("\n", 1)[0].lower() == '-входы')
 async def edit_status_v_off(m: Message):
@@ -27,7 +27,7 @@ async def edit_status_v_off(m: Message):
     chat_id = m.chat.id
     status_v = "no"
     await edit_status_v(chat_id, status_v)
-    await m.answer('❌ Уведомления о входе выключены')
+    await m.answer('Уведомления о входе выключены')
 
 
 @alerts.message(F.text.split("\n", 1)[0].lower() == '+выходы')
@@ -37,7 +37,7 @@ async def edit_status_e_on(m: Message):
     chat_id = m.chat.id
     status_e = "yes"
     await edit_status_e(chat_id, status_e)
-    await m.answer('✅ Уведомления о выходе включены')
+    await m.answer('Уведомления о выходе включены')
 
 @alerts.message(F.text.split("\n", 1)[0].lower() == '-выходы')
 async def edit_status_e_off(m: Message):
@@ -46,5 +46,5 @@ async def edit_status_e_off(m: Message):
     chat_id = m.chat.id
     status_e = "no"
     await edit_status_e(chat_id, status_e)
-    await m.answer('❌ Уведомления о выходе выключены')
+    await m.answer('Уведомления о выходе выключены')
 

@@ -12,7 +12,6 @@ import asyncio
 from handlers.AdminsTools.ChatSettings.welcome.check_join_left import handle_join, handle_leave
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.msg_stats_cache import increment_message
-from handlers.BotAutomaticWork.users.checks.user_online_status import get_user_status
 from handlers.BotAutomaticWork.users.links.clean_user_name import clean_name
 from handlers.AdminsTools.ChatSettings.ChatAdmins.ChatAdminsDB import check_and_add_user_rang
 
@@ -217,59 +216,35 @@ class UpdateChatUserMiddleware(BaseMiddleware):
         result = await handler(event, data)
         return "ok"
 
-    async def update_basic_user_data(self, user_id: int, name: str, username: str, chat: Any, is_ignored: bool = False):
-        """Обновляет данные пользователя — С ПРИОРИТЕТОМ ДЛЯ last_activity"""
+    async def update_basic_user_data(self, user_id: int, name: str, username: str, chat: Any):
+        """Обновляет данные пользователя — максимально быстро и без лишних запросов."""
         try:
-            pool = get_db_pool()  # ← ИСПРАВЛЕНО: БЕЗ await!
+            pool = get_db_pool()
             async with pool.acquire() as conn:
-                current_time = datetime.now(MOSCOW_TZ).isoformat()
+                now = datetime.now(MOSCOW_TZ).isoformat()
 
-                # 🔥 ПРИОРИТЕТ №1: СРАЗУ обновляем last_activity
-                existing_user = await conn.fetchrow('SELECT 1 FROM users WHERE user_id = $1', user_id)
-                if existing_user:
-                    await conn.execute('UPDATE users SET last_activity = $1 WHERE user_id = $2', current_time, user_id)
-                else:
-                    # Новый пользователь — создаём с last_activity
+                # 1. Одно атомарное обновление данных (name, username + last_activity)
+                # ON CONFLICT делает всё за 1 запрос вместо SELECT+UPDATE/INSERT
+                await conn.execute('''
+                    INSERT INTO users (user_id, name, username, first_seen, last_activity)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    username = EXCLUDED.username,
+                    last_activity = EXCLUDED.last_activity
+                ''', user_id, name, username, now, now)
+
+                # 2. Привязка к чату (только если это группа)
+                if chat and hasattr(chat, 'type') and chat.type != 'private':
                     await conn.execute('''
-                        INSERT INTO users (user_id, name, username, first_seen, last_activity)
-                        VALUES ($1, $2, $3, $4, $5)
-                    ''', user_id, name, username, current_time, current_time)
-                    return  # ← можно вернуться, если не нужно обновлять профиль
+                        INSERT INTO users_chats (chat_id, user_id)
+                        VALUES ($1, $2)
+                        ON CONFLICT (chat_id, user_id) DO NOTHING
+                    ''', chat.id, user_id)
 
-                # Получаем полные данные для сравнения
-                full_user = await conn.fetchrow('SELECT name, username FROM users WHERE user_id = $1', user_id)
-                if full_user and (full_user['name'] != name or full_user['username'] != username):
-                    await conn.execute('''
-                        UPDATE users SET name = $1, username = $2 WHERE user_id = $3
-                    ''', name, username, user_id)
-
-                # Только ПОСЛЕ этого — статус, таймеры, чаты
-                previous_status = await get_user_status(user_id)
-                current_status = await get_user_status(user_id)
-                if previous_status != current_status or current_status == '🔥':
-                    if current_status == '🔥':
-                        try:
-                            await set_user_offline_timer(user_id)
-                        except Exception as e:
-                            logger.error(f"Ошибка при установке таймера для {user_id}: {e}")
-
-                # Умное обновление информации о чате
-                if (chat and hasattr(chat, 'type') and
-                        chat.type != "private" and
-                        str(chat.id).startswith("-100")):
+                    # 3. Умное обновление инфо о чате (оставляем, как было, оно полезно)
                     await self.update_chat_info_smart(conn, chat)
 
-                # Добавляем в users_chats если нужно
-                if chat and hasattr(chat, 'type') and chat.type != 'private':
-                    exists = await conn.fetchval(
-                        'SELECT 1 FROM users_chats WHERE chat_id = $1 AND user_id = $2',
-                        chat.id, user_id
-                    )
-                    if not exists:
-                        await conn.execute(
-                            'INSERT INTO users_chats (chat_id, user_id) VALUES ($1, $2)',
-                            chat.id, user_id
-                        )
         except Exception as e:
             logger.error(f"Ошибка при обновлении данных пользователя {user_id}: {e}", exc_info=True)
 

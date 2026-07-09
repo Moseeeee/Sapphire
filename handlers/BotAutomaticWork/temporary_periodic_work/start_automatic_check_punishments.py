@@ -1,8 +1,11 @@
+import aiohttp
 import asyncio
 import logging
 from datetime import datetime
 from typing import List, Tuple
 import pytz
+from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 
 from handlers.AdminsTools.ChatSettings.message_pinned.pin_smsDB import remove_pinned_message
 from handlers.AdminsTools.CommandsModerations.warns.warnsDB import clear_expired_warns
@@ -11,7 +14,6 @@ from handlers.AdminsTools.CommandsModerations.bans.banDB import remove_ban_info
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.BotAutomaticWork.universal_bot import bot
-
 
 logger = logging.getLogger(__name__)
 MOSCOW_TZ = pytz.timezone('Europe/Moscow')
@@ -64,17 +66,32 @@ async def get_expired_warns() -> List[Tuple[int, int]]:
 async def perform_auto_unban(chat_id: int, user_id: int) -> bool:
     """Выполняет автоматический разбан."""
     try:
-        await bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
-        await remove_ban_info(chat_id, user_id)
+        try:
+            await bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
+            await remove_ban_info(chat_id, user_id)
 
-        user_link = await user_link_global(user_id)
-        await bot.send_message(
-            chat_id=chat_id,
-            text=f'✅ {user_link} был разбанен.\nТеперь он может вернуться в чат!',
-            parse_mode='HTML',
-            disable_web_page_preview=True
-        )
-        return True
+            user_link = await user_link_global(user_id)
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f'✅ {user_link} был разбанен.\nТеперь он может вернуться в чат!',
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+            return True
+        except TelegramBadRequest as e:
+            error_message = str(e).lower()
+            # Если пользователь уже разбанен, не найден или стал админом
+            if "not found" in error_message or "administrator" in error_message or "admin" in error_message:
+                logger.warning(f"⚠️ Предупреждение при разбане {user_id} в чате {chat_id}: {e}. Удаляем запись.")
+                await remove_ban_info(chat_id, user_id)
+                return True
+            elif "not enough rights" in error_message or "not an administrator" in error_message:
+                logger.error(f"❌ Бот не имеет прав для разбана {user_id} в чате {chat_id}")
+                return False
+            else:
+                logger.error(f"❌ Ошибка Telegram при разбане {user_id}: {e}")
+                await remove_ban_info(chat_id, user_id)
+                return True
     except Exception as e:
         logger.error(e, exc_info=True)
         return False
@@ -83,16 +100,81 @@ async def perform_auto_unban(chat_id: int, user_id: int) -> bool:
 async def perform_auto_unmute(chat_id: int, user_id: int) -> bool:
     """Выполняет автоматический размут."""
     try:
-        chat = await bot.get_chat(chat_id)
-        await bot.restrict_chat_member(
-            chat_id=chat_id,
-            user_id=user_id,
-            permissions=chat.permissions
-        )
-        await remove_mute_info(chat_id, user_id)
-        return True
+        try:
+            chat_member = await bot.get_chat_member(chat_id, user_id)
+            chat = await bot.get_chat(chat_id)
+
+            # Если пользователь администратор - просто удаляем запись
+            if chat_member.status in ['administrator', 'creator']:
+                logger.warning(f"⚠️ Пользователь {user_id} является администратором, удаляем запись о муте")
+                await remove_mute_info(chat_id, user_id)
+
+                user_link = await user_link_global(user_id)
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f'ℹ️ {user_link} является администратором, запись о муте удалена.',
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+                return True
+
+            # Если не администратор - размут
+            await bot.restrict_chat_member(
+                chat_id=chat_id,
+                user_id=user_id,
+                permissions=chat.permissions
+            )
+            await remove_mute_info(chat_id, user_id)
+
+            user_link = await user_link_global(user_id)
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f'✅ {user_link} снова может общаться в чате.',
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+            return True
+
+        except TelegramBadRequest as e:
+            error_message = str(e).lower()
+
+            # Пользователь является администратором
+            if "administrator" in error_message or "admin" in error_message:
+                logger.warning(f"⚠️ Пользователь {user_id} администратор, удаляем запись о муте")
+                await remove_mute_info(chat_id, user_id)
+                return True
+
+            # Бот не является администратором или нет прав
+            elif "not an administrator" in error_message or "not enough rights" in error_message:
+                logger.error(f"❌ Бот не имеет прав для размута {user_id} в чате {chat_id}")
+                return False
+
+            # Пользователь или чат не найдены
+            elif "user not found" in error_message or "chat not found" in error_message:
+                logger.warning(f"⚠️ Пользователь {user_id} или чат {chat_id} не найден, удаляем запись")
+                await remove_mute_info(chat_id, user_id)
+                return True
+
+            # Неизвестная ошибка Telegram
+            else:
+                logger.error(f"❌ Неизвестная ошибка Telegram при размуте {user_id}: {error_message}")
+                await remove_mute_info(chat_id, user_id)
+                return True
+
+        except asyncio.TimeoutError:
+            logger.error(f"⏰ Таймаут при размуте {user_id} в чате {chat_id}")
+            return False
+
+        except aiohttp.ClientError as e:
+            logger.error(f"🌐 Ошибка сети при размуте {user_id}: {e}")
+            return False
+
+        except Exception as e:
+            logger.error(f"❌ Непредвиденная ошибка при размуте {user_id} в чате {chat_id}: {e}", exc_info=True)
+            return False
+
     except Exception as e:
-        logger.error(e, exc_info=True)
+        logger.error(f"❌ Критическая ошибка в perform_auto_unmute для {user_id}: {e}", exc_info=True)
         return False
 
 
@@ -135,7 +217,6 @@ async def get_next_check_interval() -> int:
         async with pool.acquire() as conn:
             current_time = get_moscow_time()
 
-            # Находим ближайшее время окончания наказания или варна
             result = await conn.fetchval('''
                 SELECT MIN(next_time) FROM (
                     SELECT MIN(time_end::TIMESTAMPTZ) AS next_time FROM punishment_time WHERE time_end::TIMESTAMPTZ > $1::TIMESTAMPTZ
@@ -147,32 +228,28 @@ async def get_next_check_interval() -> int:
             ''', current_time)
 
             if result:
-                # Если результат уже является datetime объектом
                 if isinstance(result, datetime):
                     next_expiry = result
                 else:
-                    next_expiry = datetime.fromisoformat(str(result)).replace(tzinfo=MOSCOW_TZ)
+                    next_expiry = datetime.fromisoformat(str(result))
+
+                if next_expiry.tzinfo is None:
+                    next_expiry = next_expiry.replace(tzinfo=MOSCOW_TZ)
+                else:
+                    next_expiry = next_expiry.astimezone(MOSCOW_TZ)
 
                 current_time_moscow = get_moscow_time()
                 seconds_until_next = (next_expiry - current_time_moscow).total_seconds()
 
-                # Оптимизация: не реже 1 минуты, не чаще 1 дня
-                if seconds_until_next <= 60:
-                    return 60
-                elif seconds_until_next <= 300:  # 5 мин
-                    return 60
-                elif seconds_until_next <= 3600:  # 1 час
-                    return 300
-                elif seconds_until_next <= 86400:  # 1 день
-                    return 3600
-                else:
-                    return 86400
+                if seconds_until_next > 0:
+                    # Динамически спим до следующего наказания (не чаще 5 сек и не реже 30 сек для отзывчивости)
+                    return max(30, min(int(seconds_until_next), 500))
 
-        return 3600  # По умолчанию — раз в час
+        return 500  # Если активных задач в БД нет, спим 30 секунд
 
     except Exception as e:
         logger.error(e, exc_info=True)
-        return 3600
+        return 500
 
 
 async def auto_punishment_check():
@@ -182,12 +259,10 @@ async def auto_punishment_check():
         try:
             check_interval = await get_next_check_interval()
 
-            # Проверяем истекшие наказания
             expired_punishments = await get_expired_punishments()
             expired_warns = await get_expired_warns()
             expired_pins = await get_expired_pinned_messages_auto()
 
-            # Обрабатываем истекшие наказания
             if expired_punishments:
                 for chat_id, user_id, p_type in expired_punishments:
                     if p_type == 'ban':
@@ -196,15 +271,8 @@ async def auto_punishment_check():
                         await perform_auto_unmute(chat_id, user_id)
                     await asyncio.sleep(0.5)
 
-            # Обрабатываем истекшие варны
             if expired_warns:
                 await clear_expired_warns()
-
-            # Обрабатываем истекшие закрепления
-            if expired_pins:
-                for chat_id, message_id in expired_pins:
-                    await perform_auto_unpin(chat_id, message_id)
-                    await asyncio.sleep(0.5)
 
             await asyncio.sleep(check_interval)
 
@@ -213,15 +281,19 @@ async def auto_punishment_check():
             break
         except Exception as e:
             logger.error(f"Ошибка в автоматической проверке: {e}")
-            await asyncio.sleep(3600)
+            await asyncio.sleep(30)
 
 
-async def start_auto_punishment_check() -> str:
+start_checking_punishments = Router()
+
+
+@start_checking_punishments.startup()
+async def start_auto_punishment_check():
     """Запускает фоновую задачу автоматической проверки."""
     try:
         logger.info("🚀 Запуск системы автоматической проверки наказаний...")
         asyncio.create_task(auto_punishment_check())
-        return 'ok'
+        print('ok 010101001010101010101010101010100')
     except Exception as e:
         logger.error(e, exc_info=True)
-        return 'error'
+        print('error')

@@ -6,6 +6,7 @@ from aiogram.filters import Command
 from pytz import timezone
 from datetime import datetime
 
+from BotAutomaticWork.users.checks.check_users_status_online.user_online_privacy import get_user_online_emoji
 from handlers.AdminsTools.ChatSettings.ChatAdmins.ChatAdminsDB import (
     add_admin_for_rang,
     check_admin_for_rang,
@@ -23,8 +24,8 @@ from typing import List, Tuple
 from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
-from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
-from handlers.BotAutomaticWork.users.checks.user_online_status import get_user_status
+from BotAutomaticWork.users.checks.check_UserId.check_users_id import resolve_id
+from BotAutomaticWork.users.checks.check_users_status_online.user_online_status import get_user_status
 from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
@@ -145,15 +146,14 @@ async def increase_chat_admin(m: Message):
                 else:
                     # "повысить {ранг}" без username
                     await m.answer(
-                        "❌ <b>Укажите пользователя!</b>\n"
-                        "Используйте: Повысить {ранг} @username\n"
-                        "Или ответьте на сообщение пользователя",
+                        "<b>Укажите пользователя!</b>\n"
+                        "Используйте: Повысить {ранг} @username или ответьте на сообщение пользователя",
                         parse_mode='HTML'
                     )
                     return
 
         if not UserId:
-            await m.reply("⚠️ Не удалось определить пользователя. Укажите @username или ID.")
+            await m.reply("Не удалось определить пользователя. Укажите @username или ID.")
             return
 
         # Если ранг не указан, повышаем на 1 от текущего
@@ -168,7 +168,7 @@ async def increase_chat_admin(m: Message):
                 rang = UserRang + 1
         else:
             if not rang_str.isdigit():
-                await m.reply('❗ Ранг должен быть числом от 1 до 5.')
+                await m.reply('Ранг должен быть числом от 1 до 5.')
                 return
             rang = int(rang_str)
 
@@ -182,7 +182,7 @@ async def increase_chat_admin(m: Message):
 
         # Проверяем, является ли целевой пользователь владельцем (ранг 5)
         if UserRang == 5 and not is_tg_owner:
-            await m.answer('❌ Нельзя изменять ранг владельца.', parse_mode='HTML')
+            await m.answer('Нельзя изменять ранг владельца.', parse_mode='HTML')
             return
 
         # Босс-агенты имеют полную власть
@@ -190,7 +190,7 @@ async def increase_chat_admin(m: Message):
             # Telegram-владелец может управлять любыми администраторами и повышать до 5 ранга
             if not is_tg_owner:
                 if UserRang > ManagementRang:
-                    await m.answer('❌ Вы не можете управлять администраторами высшего ранга.',
+                    await m.answer('Вы не можете управлять администраторами высшего ранга.',
                                    parse_mode='HTML')
                     return
 
@@ -198,23 +198,23 @@ async def increase_chat_admin(m: Message):
                 max_allowed_rang = ManagementRang
                 if rang > max_allowed_rang:
                     await m.answer(
-                        f'❌ Вы не можете повысить до ранга {rang}, так как ваш ранг {ManagementRang}.',
+                        f'Вы не можете повысить до ранга {rang}, так как ваш ранг {ManagementRang}.',
                         parse_mode='HTML')
                     return
 
         # Проверяем, не пытаемся ли повысить выше 5 ранга
         if rang > 5:
-            await m.answer('❌ Максимальный ранг - 5.', parse_mode='HTML')
+            await m.answer('Максимальный ранг - 5.', parse_mode='HTML')
             return
 
         # Проверяем, не пытаемся ли понизить (если новый ранг ниже текущего)
         if rang < UserRang:
-            await m.answer('❌ Новый ранг должен быть выше текущего.', parse_mode='HTML')
+            await m.answer('Новый ранг должен быть выше текущего.', parse_mode='HTML')
             return
 
         # Проверяем, не пытаемся ли оставить на том же ранге
         if rang == UserRang:
-            await m.answer('❌ Пользователь уже на этом ранге.', parse_mode='HTML')
+            await m.answer('Пользователь уже на этом ранге.', parse_mode='HTML')
             return
 
         gender = await get_user_gender(UserId)
@@ -269,7 +269,7 @@ async def decrease_chat_admin(m: Message):
             parts = m.text.split()
             if len(parts) < 2:
                 await m.answer(
-                    "❌ <b>Неверный формат команды!</b>\nИспользуйте: Понизить {@username} или ответьте на сообщение",
+                    "<b>Неверный формат команды!</b>\nИспользуйте: Понизить {@username} или ответьте на сообщение",
                     parse_mode='HTML')
                 return
 
@@ -278,7 +278,7 @@ async def decrease_chat_admin(m: Message):
             UserId = await resolve_id(m, mention)
 
             if not UserId:
-                await m.reply("⚠️ Не удалось определить пользователя. Укажите @username или ID.")
+                await m.reply("Не удалось определить пользователя. Укажите @username или ID.")
                 return
             rang_str = None
 
@@ -290,11 +290,11 @@ async def decrease_chat_admin(m: Message):
             if CheckUserRang > 0:
                 rang = CheckUserRang - 1
             else:
-                await m.answer("⚠️ Пользователь не является администратором.")
+                await m.answer("Пользователь не является администратором.")
                 return
         else:
             if not rang_str.isdigit():
-                await m.reply('❗ Ранг должен быть числом.')
+                await m.reply('Ранг должен быть числом.')
                 return
             rang = int(rang_str)
 
@@ -305,11 +305,11 @@ async def decrease_chat_admin(m: Message):
         is_tg_owner = await is_telegram_owner(m.bot, ChatId, ManagementAdminId)
 
         if CheckUserRang == 5 and not is_tg_owner:
-            await m.answer('❌ <b>Нельзя понизить владельца!</b>', parse_mode='HTML')
+            await m.answer('Нельзя понизить владельца!', parse_mode='HTML')
             return
 
         if CheckUserRang == 0:
-            await m.answer(f'⚠️ {user_link} не является администратором',
+            await m.answer(f'{user_link} не является администратором',
                            parse_mode='HTML',
                            disable_web_page_preview=True)
             return
@@ -317,16 +317,16 @@ async def decrease_chat_admin(m: Message):
         if ManagementAdminId not in boss_agent:
             if not is_tg_owner:
                 if CheckUserRang >= ManagementRang:
-                    await m.answer('❌ <b>Вы не можете управлять администраторами равного или высшего ранга!</b>',
+                    await m.answer('Вы не можете управлять администраторами равного или высшего ранга!',
                                    parse_mode='HTML')
                     return
 
         if rang < 0 or rang > 4:
-            await m.reply('❌ <b>Ранг должен быть от 0 до 4.</b>', parse_mode='HTML')
+            await m.reply('Ранг должен быть от 0 до 4.', parse_mode='HTML')
             return
 
         if rang >= CheckUserRang:
-            await m.reply('❌ <b>Целевой ранг должен быть ниже текущего!</b>', parse_mode='HTML')
+            await m.reply('Целевой ранг должен быть ниже текущего!', parse_mode='HTML')
             return
 
         if rang == 0:
@@ -377,14 +377,14 @@ async def remove_chat_admin(m: Message):
         else:
             parts = m.text.split(maxsplit=1)
             if len(parts) < 2 or not parts[1].strip():
-                await m.answer("❌ <b>Неверный формат команды!</b>\nИспользуйте: Снять {@username} или ответьте на сообщение того, кого хотите снять",
+                await m.answer("<b>Неверный формат команды!</b>\nИспользуйте: Снять {@username} или ответьте на сообщение того, кого хотите снять",
                                parse_mode='HTML')
                 return
             mention = parts[1].strip()
             UserId = await resolve_id(m, mention)
 
         if not UserId:
-            await m.reply("⚠️ Не удалось определить пользователя.")
+            await m.reply("Не удалось определить пользователя.")
             return
 
         ChatId = m.chat.id
@@ -398,7 +398,7 @@ async def remove_chat_admin(m: Message):
 
         # Проверяем, является ли целевой пользователь владельцем (ранг 5)
         if CheckUserRang == 5 and not is_tg_owner:
-            await m.answer('❌ <b>Нельзя снять владельца!</b>', parse_mode='HTML')
+            await m.answer('Нельзя снять владельца!', parse_mode='HTML')
             return
 
         if CheckUserRang == 0:
@@ -412,7 +412,7 @@ async def remove_chat_admin(m: Message):
             # Telegram-владелец может управлять любыми администраторами
             if not is_tg_owner:
                 if CheckUserRang > ManagementRang:
-                    await m.answer('❌ <b>Вы не можете управлять администраторами высшего ранга!</b>', parse_mode='HTML')
+                    await m.answer('❌ Вы не можете управлять администраторами высшего ранга!', parse_mode='HTML')
                     return
 
         rank_names = {
@@ -517,7 +517,7 @@ async def log_chat_admin(m: Message):
             parts = m.text.split(maxsplit=1)
             if len(parts) < 2 or not parts[1].strip():
                 await m.answer(
-                    "❌ <b>Неверный формат команды!</b>\nИспользуйте: Лог {@username} или ответьте на сообщение",
+                    "<b>Неверный формат команды!</b>\nИспользуйте: Логи {@username} или ответьте на сообщение",
                     parse_mode='HTML')
                 return
             mention = parts[1].strip()
@@ -532,7 +532,7 @@ async def log_chat_admin(m: Message):
         user_link = await user_link_global(UserId)
 
         if not HISTORY:
-            await m.answer(f"📭 <b>У {user_link} нет истории изменений административных прав.</b>",
+            await m.answer(f"У {user_link} нет истории изменений административных прав.",
                            parse_mode='HTML', disable_web_page_preview=True)
             return
 
@@ -552,9 +552,9 @@ async def log_chat_admin(m: Message):
             gender_admin = await get_user_gender(ManagementAdminId)
 
             if OldRang > rang:
-                t = f'🔴 пониж{g("ен", gender)} с {OldRang} до {rang}'
+                t = f'пониж{g("ен", gender)} с {OldRang} до {rang}'
             elif OldRang < rang:
-                t = f'🟢 повыш{g("ен", gender)} с {OldRang} до {rang}'
+                t = f'повыш{g("ен", gender)} с {OldRang} до {rang}'
             else:
                 t = '⚠️ ОШИБКА ПОДСЧЁТА'
 
@@ -571,7 +571,7 @@ async def log_chat_admin(m: Message):
 
     except Exception as e:
         logger.error(e, exc_info=True)
-        await m.answer("❌ <b>Произошла ошибка при получении лога.</b>", parse_mode='HTML')
+        await m.answer("Произошла ошибка при получении лога.", parse_mode='HTML')
 
 
 
@@ -614,7 +614,8 @@ async def list_admins(m: Message):
 
             # АСИНХРОННО получаем статус для каждого администратора
             try:
-                status = await get_user_status(int(user_id))
+                #status = await get_user_status(int(user_id))
+                status = await get_user_online_emoji(user_id)
             except Exception as e:
                 print(f"Error getting status for user {user_id}: {e}")
                 status = '❓'  # Статус по умолчанию в случае ошибки
@@ -666,7 +667,7 @@ async def list_admins(m: Message):
 
     except Exception as e:
         logger.error(e, exc_info=True)
-        await m.answer("❌ <b>Произошла ошибка при получении списка администраторов.</b>", parse_mode='HTML')
+        await m.answer("Произошла ошибка при получении списка администраторов.", parse_mode='HTML')
 
 
 
@@ -720,7 +721,7 @@ async def resign_admin(m: Message):
 
     except Exception as e:
         logger.error(e, exc_info=True)
-        await m.answer("❌ <b>Произошла ошибка при обработке запроса.</b>", parse_mode='HTML')
+        await m.answer("Произошла ошибка при обработке запроса.", parse_mode='HTML')
 
 
 
@@ -777,7 +778,7 @@ async def restore_owner(m: Message):
 
     except Exception as e:
         logger.error(e, exc_info=True)
-        await m.answer("❌ <b>Произошла ошибка при восстановлении должности.</b>", parse_mode='HTML')
+        await m.answer("Произошла ошибка при восстановлении должности.", parse_mode='HTML')
 
 
 @chatadmin.callback_query(lambda c: c.data.startswith(('log_prev_', 'log_next_')))
@@ -820,9 +821,9 @@ async def handle_log_pagination(callback: CallbackQuery):
             gender_admin = await get_user_gender(ManagementAdminId)
 
             if OldRang > rang:
-                t = f'🔴 пониж{g("ен", gender)} с {OldRang} до {rang}'
+                t = f'пониж{g("ен", gender)} с {OldRang} до {rang}'
             elif OldRang < rang:
-                t = f'🟢 повыш{g("ен", gender)} с {OldRang} до {rang}'
+                t = f'повыш{g("ен", gender)} с {OldRang} до {rang}'
             else:
                 t = '⚠️ ОШИБКА ПОДСЧЁТА'
 
@@ -840,7 +841,7 @@ async def handle_log_pagination(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(e, exc_info=True)
-        await callback.answer("❌ Ошибка при переключении страницы")
+        await callback.answer("Ошибка при переключении страницы")
 
 
 # Обработчик для кнопки текущей страницы

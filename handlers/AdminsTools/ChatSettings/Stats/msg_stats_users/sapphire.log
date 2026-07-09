@@ -18,3 +18,9 @@
 2026-02-03 22:42:39,370 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
 2026-02-03 22:42:39,396 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: Sapphire | Chat Manager (8277713159)
 2026-02-03 22:42:39,396 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'
+2026-07-03 02:24:11,810 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
+2026-07-03 02:24:11,818 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: Test Sapphire (8020015583)
+2026-07-03 02:24:11,818 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'
+2026-07-08 22:12:56,265 - INFO - handlers.BotAutomaticWork.active_bot_registry - 📋 Загружено 0 активных чатов
+2026-07-08 22:12:56,273 - INFO - handlers.BotAutomaticWork.universal_bot - ✅ Создан: Test Sapphire (8020015583)
+2026-07-08 22:12:56,273 - INFO - handlers.BotAutomaticWork.universal_bot - 🌐 UniversalBot готов! Используйте 'bot.method()'

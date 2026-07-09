@@ -38,8 +38,9 @@ def get_moscow_time() -> datetime:
     return datetime.now(moscow)
 
 
-# --- Команды для установки приветствия ---
-@welcom.message(lambda m: m.text and m.text.lower().startswith("+приветствие"))
+
+
+@welcom.message(F.text.startswith("+приветствие"))
 async def new_welcome_text(msg: Message):
     try:
         if msg.chat.type == 'private':
@@ -48,60 +49,49 @@ async def new_welcome_text(msg: Message):
         if not await auto_check_AccessLevel_for_rang(msg.from_user.id, msg.chat.id, 49):
             return
 
-        try:
-            welcome_text = msg.html_text.split("\n", 1)[1]
-            chat_id = msg.chat.id
-            user_id = msg.from_user.id
-
-            chat_link = await chat_global_link(chat_id)
-            user_link = await user_link_global(user_id)
-
-            check_links_text = contains_links(welcome_text)
-
-            # Проверяем на наличие ссылок
-            if check_links_text:
-                admin_message = await msg.bot.send_message(
-                    AGENT_CHAT_ID_CheckTextApprovals,
-                    f"📝 <b>Новое приветствие на проверку</b>\n\n"
-                    f"<b>Текст:</b>\n{welcome_text}\n\n"
-                    f"ℹ️ Некая информация:\n"
-                    f"<b>Чат:</b> {chat_link}\n"
-                    f"<b>Пользователь:</b> {user_link}",
-                    reply_markup=get_moderation_keyboard(chat_id, user_id, "welcome"),
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
-                )
-
-                await msg.reply('⚠️ Текст отправлен на проверку, ожидайте.')
-
-
-                existing = await get_pending_moderation(chat_id, 'welcome')
-
-                if existing:
-                    try:
-                        await msg.bot.delete_message(AGENT_CHAT_ID_CheckTextApprovals, existing['admin_message_id'])
-                    except:
-                        pass
-
-                    # Обновляем запись
-                    await add_pending_moderation(chat_id, 'welcome', welcome_text, msg.message_id,
-                                                 admin_message.message_id, user_id)
-                else:
-                    # Создаем новую запись
-                    await add_pending_moderation(chat_id, 'welcome', welcome_text, msg.message_id,
-                                                 admin_message.message_id, user_id)
-
-
-            else:
-                # Если ссылок нет, сразу сохраняем
-                await add_welcome_text(chat_id, welcome_text)
-                await msg.reply('✅ Приветствие изменено')
-
-        except IndexError:
-            await msg.reply('⚠️ Укажите текст приветствия после команды, начиная с новой строки.')
+        parts = msg.html_text.split("\n", 1)
+        if len(parts) < 2:
+            await msg.reply('Укажите текст приветствия после команды, начиная с новой строки.')
             return
+
+        welcome_text = parts[1].strip()
+        chat_id = msg.chat.id
+        user_id = msg.from_user.id
+
+        chat_link = await chat_global_link(chat_id)
+        user_link = await user_link_global(user_id)
+
+        if contains_links(welcome_text):
+            admin_message = await msg.bot.send_message(
+                AGENT_CHAT_ID_CheckTextApprovals,
+                f"📝 <b>Новое приветствие на проверку</b>\n\n"
+                f"<b>Текст:</b>\n{welcome_text}\n\n"
+                f"ℹ️ Некая информация:\n"
+                f"<b>Чат:</b> {chat_link}\n"
+                f"<b>Пользователь:</b> {user_link}",
+                reply_markup=get_moderation_keyboard(chat_id, user_id, "welcome"),
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+            await msg.reply('Текст отправлен на проверку, ожидайте.')
+
+            existing = await get_pending_moderation(chat_id, 'welcome')
+            if existing:
+                try:
+                    await msg.bot.delete_message(AGENT_CHAT_ID_CheckTextApprovals, existing['admin_message_id'])
+                except Exception:
+                    pass
+
+            await add_pending_moderation(chat_id, 'welcome', welcome_text, msg.message_id, admin_message.message_id, user_id)
+        else:
+            await add_welcome_text(chat_id, welcome_text)
+            await msg.reply('✅ Приветствие изменено')
+
+    except IndexError:
+        await msg.reply('Укажите текст приветствия после команды, начиная с новой строки.')
     except Exception as e:
         logger.error(e, exc_info=True)
+        await msg.reply('❌ Произошла ошибка')
 
 
 
@@ -120,7 +110,7 @@ async def del_welcome_text(msg: Message):
             await delete_welcome_text(ChatId)
             await msg.reply('✅ Приветствие чата удалено')
         else:
-            await msg.reply('🤓 Приветствия чата и не было')
+            await msg.reply('Приветствие не установлено')
             return
     except Exception as e:
         logger.error(e, exc_info=True)
@@ -150,7 +140,7 @@ async def welcome_text(msg: Message):
         else:
             await bot.send_message(
                 chat_id=ChatId,
-                text='❌ Приветствие чата не установлено'
+                text='Приветствие чата не установлено'
             )
     except Exception as e:
         logger.error(e, exc_info=True)

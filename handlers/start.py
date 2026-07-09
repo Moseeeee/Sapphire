@@ -8,12 +8,13 @@ from datetime import datetime, timedelta
 import pytz
 from typing import List
 
-from aiogram import Router, F
+from aiogram import Router, F, types
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, BotCommand, \
-    BotCommandScopeChat
+    BotCommandScopeChat, Update
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
 
+from handlers.BotAutomaticWork.users.checks.check_users_status_online.check_online_statusDB import get_user_activity
 from handlers.AdminsTools.ChatSettings.captcha.captchaDB import is_captcha_enabled, get_user_last_successful_captcha, \
     get_captcha_settings
 from handlers.BotAutomaticWork.Gonfig.config import boss_agent, sanor_ID
@@ -25,6 +26,47 @@ from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link imp
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+
+
+#@router.message(Command("start"))
+async def cmd_start(message: types.Message):
+    # Убедитесь, что ссылка сформирована верно согласно документации вашего Mini App
+    link = "https://t.me/newbot/bot_for_testing_sapp_hire_bot/saaaaaaaaap_sp_testtt_bot?startapp=name_mya"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Создать управляемого бота", url=link)]
+    ])
+    await message.answer("Нажмите кнопку для создания бота:", reply_markup=kb)
+
+
+# ИСПРАВЛЕННЫЙ ХЕНДЛЕР
+# В aiogram 3.x мы ловим конкретный тип события.
+# Если ваше окружение поддерживает F.managed_bot, то это обычно объект типа Message или ChatMemberUpdated.
+
+#@router.message(F.managed_bot)
+async def handle_managed_bot(message: types.Message):
+    # Данные берем из объекта message, который прислал сервер
+    mb = message.managed_bot
+
+    token = mb.token
+    user_id = mb.manager_user_id
+    username = mb.username
+
+    # Отправляем подтверждение
+    await message.answer(
+        text=(
+            f"✅ Бот **@{username}** успешно создан!\n\n"
+            f"Ваш токен: `{token}`\n"
+            f"ID владельца: `{user_id}`"
+        ),
+        parse_mode="Markdown"
+    )
+
+
+
+
 
 
 # ============ ФУНКЦИИ ДЛЯ ПОЛУЧЕНИЯ СТАТИСТИКИ ============
@@ -183,8 +225,7 @@ async def start_command(message: Message):
 
         # === Обработка deep link для капчи ===
         if message.text and message.text.startswith("/start captcha_"):
-            # Формат: /start captcha_CHATID_USERID
-            payload = message.text.split(" ", 1)[1]  # "captcha_CHATID_USERID"
+            payload = message.text.split(" ", 1)[1]
             parts = payload.split("_")
 
             if len(parts) == 3 and parts[0] == "captcha":
@@ -195,17 +236,14 @@ async def start_command(message: Message):
                     await message.answer("❌ Неверная ссылка для капчи.")
                     return
 
-                # Проверяем, что пользователь совпадает
                 if user_id != target_user_id:
                     await message.answer("❌ Эта капча предназначена другому пользователю.")
                     return
 
-                # Проверяем, включена ли капча в чате
                 if not await is_captcha_enabled(chat_id):
                     await message.answer("ℹ️ Капча в этом чате больше не требуется.")
                     return
 
-                # Проверяем, не прошёл ли уже капчу
                 last_successful = await get_user_last_successful_captcha(chat_id, user_id)
                 if last_successful:
                     difficulty_levels = {'легкая': 1, 'средняя': 2, 'тяжелая': 3, 'хардкорд': 4}
@@ -216,11 +254,9 @@ async def start_command(message: Message):
                         await message.answer("✅ Вы уже прошли капчу в этом чате!")
                         return
 
-                # Получаем настройки капчи
                 time_limit_str, difficulty, attempts_limit, _ = await get_captcha_settings(chat_id)
                 time_limit = parse_time_string(time_limit_str) or timedelta(minutes=5)
 
-                # Отправляем капчу
                 from handlers.AdminsTools.ChatSettings.captcha.captcha_main import send_captcha_to_user
                 await send_captcha_to_user(
                     bot=message.bot,
@@ -230,11 +266,11 @@ async def start_command(message: Message):
                     attempts_limit=attempts_limit,
                     time_limit=time_limit
                 )
-                return  # Не показываем обычное меню
+                return
 
-        # === Обычный запуск (/start без аргументов или с другим payload) ===
+        # === Обычный запуск (/start без аргументов) ===
 
-        if user_id == sanor_ID:  # Убедитесь, что sanor_ID — это ID (int), а не список!
+        if user_id == sanor_ID:
             stats_text = await get_system_stats()
             markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text='🔄️ Перезагрузить бота', callback_data='restart_bot')],
@@ -258,12 +294,57 @@ async def start_command(message: Message):
                 BotCommand(command="full_chats_ids", description="🔗 Все чаты во вселенной Sapphire"),
             ]
         else:
+            # =========================================================
+            # ГЕНЕРАТОР СПИСКОВ ОНЛАЙН / ОФФЛАЙН АГЕНТОВ
+            # =========================================================
+            online_agents_list = []
+            offline_agents_list = []
+
+            try:
+                pool = get_db_pool()
+                async with pool.acquire() as conn:
+                    agent_rows = await conn.fetch('SELECT acting_agent_id FROM acting_agents WHERE online = TRUE')
+
+                for row in agent_rows:
+                    ag_id = row['acting_agent_id']
+
+                    # 1. Формируем красивую ссылку
+                    try:
+                        ag_link = await user_link_global(ag_id)
+                        display_str = f"{ag_link}"
+                    except Exception:
+                        display_str = f"агент не найден."
+
+                    # 2. Проверяем активность через горячий кэш RAM / БД
+                    last_act = await get_user_activity(ag_id)
+
+                    # Если проявлял активность в последние 15 минут — считаем, что онлайн
+                    if last_act and (now_msk - last_act) <= timedelta(minutes=15):
+                        online_agents_list.append(display_str)
+                    else:
+                        offline_agents_list.append(display_str)
+
+            except Exception as e:
+                logger.error(f"Ошибка проверки онлайна агентов в /start: {e}", exc_info=True)
+
+            online_agents = "\n".join(online_agents_list) if online_agents_list else "\n"
+            offline_agents = "\n".join(offline_agents_list) if offline_agents_list else ""
+            # =========================================================
+
             await message.answer(
                 f"""<b>{time1} {user_link}!</b>
+Я Сапфир — помощник для ваших чатов.
 
-<a href="https://t.me/+iwWRkgyHOwQ3ZjMy">Официальный канал</a> | <a href="https://teletype.in/@sap_sp/commands">Мой функционал</a>                    
-<blockquote><tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Бот только-только запустился, поэтому есть некоторые неточности.
-Большая просьба сообщать о найденных ошибках в <a href="https://t.me/sap_sp_chat">Sapphire | Chat</a></blockquote>
+<b>Агенты технической поддержки</b>
+☀️ Готовы помочь прямо сейчас:
+{online_agents}
+🌑 Сейчас не в сети (ответят позже):
+{offline_agents}
+
+<tg-emoji emoji-id="5282843764451195532">📋</tg-emoji> <a href='https://teletype.in/@sap_sp/commands'>Список команд «Sapphire | Chat Mavay»</a>
+<tg-emoji emoji-id="5197670259414277578">📝</tg-emoji> <a href='https://teletype.in/@sap_sp/terms-of-use'>Пользовательское соглашение</a>
+<tg-emoji emoji-id="5424818078833715060">📣</tg-emoji> <a href='https://t.me/sapphire_sp'>Официальный канал</a> 
+<tg-emoji emoji-id="5471930335312747865">💬</tg-emoji> <a href='https://t.me/sap_sp_chat'>Наш чат поддержки и простого общения</a>
 """,
                 parse_mode='HTML',
                 disable_web_page_preview=True
@@ -273,7 +354,6 @@ async def start_command(message: Message):
                 BotCommand(command="start", description="🔄 Запустить или перезапустить бота"),
                 BotCommand(command="commands", description="📖 Список команд бота"),
                 BotCommand(command="my_bans", description="⛔️ Список ваших банов во вселенной сапфира"),
-                # BotCommand(command="resources", description="🔗 Полезные ссылки/гайды"),
             ]
 
         chat_id = message.chat.id

@@ -14,7 +14,7 @@ from handlers.AgentsFeatures.AntiSpam.AntiSpamDB import check_anti_spam, add_to_
 from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import check_user_access
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
-from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
+from BotAutomaticWork.users.checks.check_UserId.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 

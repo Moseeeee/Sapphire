@@ -65,3 +65,6 @@ async def check_user_access(user_id: int, min_rank: int) -> bool:
         return rank >= min_rank
     except:
         return False
+
+
+

@@ -72,40 +72,33 @@ async def update_ban_info(chat_id: int, user_id: int, admin_id: int, reason: str
 
 
 async def update_ban_info_type(chat_id: int, user_id: int, time_end: str) -> None:
-    """Сохраняет или обновляет время окончания бана в punishment_time.
-    Для вечных банов (duration == 'навсегда') не вызывается."""
+    """Сохраняет время окончания бана в punishment_time (столбец time_end имеет тип TEXT)."""
     try:
-        # Преобразуем строку в datetime
+        from pytz import timezone
+        MOSCOW_TZ = timezone('Europe/Moscow')
+
+        # Преобразуем строку в datetime для нормализации
         try:
             time_end_dt = datetime.fromisoformat(time_end)
         except ValueError:
-            logger.error(f"Invalid time_end format: {time_end}, converting to proper format")
             if time_end.isdigit():
                 minutes = int(time_end)
                 time_end_dt = datetime.now(MOSCOW_TZ) + timedelta(minutes=minutes)
             else:
                 time_end_dt = datetime.now(MOSCOW_TZ) + timedelta(hours=1)
 
-        # Приводим к aware datetime с московским поясом
+        # Приводим к московскому времени и переводим обратно в строку ISO
         if time_end_dt.tzinfo is None:
             time_end_dt = MOSCOW_TZ.localize(time_end_dt)
+        time_end_str = time_end_dt.isoformat()
 
         pool = get_db_pool()
         async with pool.acquire() as conn:
-            # Сначала пробуем обновить существующую запись
-            result = await conn.execute('''
-                UPDATE punishment_time 
-                SET time_end = $1 
-                WHERE chat_id = $2 AND user_id = $3 AND types = $4
-            ''', time_end_dt, chat_id, user_id, 'ban')
-
-            # Если запись не была обновлена (не существует), то вставляем новую
-            if result == "UPDATE 0":
-                await conn.execute('''
-                    INSERT INTO punishment_time (chat_id, user_id, types, time_end)
-                    VALUES ($1, $2, $3, $4)
-                ''', chat_id, user_id, 'ban', time_end_dt)
-
+            await conn.execute('''
+                INSERT INTO punishment_time (chat_id, user_id, types, time_end)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (chat_id, user_id, types) DO UPDATE SET time_end = EXCLUDED.time_end
+            ''', chat_id, user_id, 'ban', time_end_str)
     except Exception as e:
         logger.error(e, exc_info=True)
 

@@ -18,7 +18,7 @@ CACHE_TABLES = {
     #'rules': ['chat_id', 'rules_text'],
     #'welcome': ['chat_id', 'welcome_text'],
     #'agents': ['agent_id', 'agent_appointed_id', 'date_appointed'],
-    'acting_agents': ['acting_agent_id', 'agent_status'],
+    #'acting_agents': ['acting_agent_id', 'agent_status'],
     #'chat_admins': ['userid', 'chatid'],
     #'users_rangs': ['userid', 'chatid', 'rang']
 }

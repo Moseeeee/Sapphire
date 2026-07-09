@@ -15,7 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
-from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
+from BotAutomaticWork.users.checks.check_UserId.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_with_pseudonym
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
@@ -58,7 +58,7 @@ class RPCommand:
 RP_COMMANDS_DATA = {
     # === ФИЗИЧЕСКИЕ ДЕЙСТВИЯ (0+) ===
     'пнуть': {"emoji": "👢", "action": "пнg('ул')", "rating": AgeRating.ZERO_PLUS.value},
-    'кик': {"emoji": "👢", "action": "пнg('ул')", "rating": AgeRating.ZERO_PLUS.value},
+    #'кик': {"emoji": "👢", "action": "пнg('ул')", "rating": AgeRating.ZERO_PLUS.value},
     'толкнуть': {"emoji": "🤜", "action": "толкнg('ул')", "rating": AgeRating.ZERO_PLUS.value},
     'дать пять': {"emoji": "✋", "action": "даg('ал') пять", "rating": AgeRating.ZERO_PLUS.value},
     'помахать': {"emoji": "👋", "action": "помахg('ал')", "rating": AgeRating.ZERO_PLUS.value},

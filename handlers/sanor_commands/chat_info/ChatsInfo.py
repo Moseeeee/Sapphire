@@ -205,7 +205,7 @@ async def mass_mailing_to_chats_command(msg: Message):
             except Exception as e:
                 failed += 1
                 failed_chats.append((chat_id, str(e)))
-                #logger.error(f"Ошибка при отправке в чат {chat_id}: {e}")
+                # logger.error(f"Ошибка при отправке в чат {chat_id}: {e}")
 
                 # Обновляем статус при ошибке
                 if i % 5 == 0 or i == total_chats:
@@ -240,7 +240,7 @@ async def mass_mailing_to_chats_command(msg: Message):
     except Exception as e:
         await msg.reply(f"❌ Произошла ошибка при выполнении рассылки по чатам:\n\n<code>{str(e)}</code>",
                         parse_mode='HTML')
-        #logger.error(f"Ошибка в команде !чаты рассылка: {e}", exc_info=True)
+        # logger.error(f"Ошибка в команде !чаты рассылка: {e}", exc_info=True)
 
 
 @chat_info_router.message(F.text.lower() == "!юзеры рассылка")
@@ -347,7 +347,7 @@ async def mass_mailing_to_users_command(msg: Message):
                 failed += 1
                 error_msg = str(e)
                 failed_users.append((user_id, error_msg))
-                #logger.error(f"Ошибка при отправке пользователю {user_id}: {e}")
+                # logger.error(f"Ошибка при отправке пользователю {user_id}: {e}")
 
                 # Обновляем статус при ошибке
                 if i % 10 == 0 or i == total_users:
@@ -382,7 +382,7 @@ async def mass_mailing_to_users_command(msg: Message):
     except Exception as e:
         await msg.reply(f"❌ Произошла ошибка при выполнении рассылки по пользователям:\n\n<code>{str(e)}</code>",
                         parse_mode='HTML')
-        #logger.error(f"Ошибка в команде !юзеры рассылка: {e}", exc_info=True)
+        # logger.error(f"Ошибка в команде !юзеры рассылка: {e}", exc_info=True)
 
 
 @chat_info_router.message(F.text.lower() == "!все рассылка")
@@ -522,7 +522,7 @@ async def mass_mailing_to_all_command(msg: Message):
                 except Exception as e:
                     failed += 1
                     failed_entities.append((f"Чат {chat_id}", str(e)))
-                    #logger.error(f"Ошибка при отправке в чат {chat_id}: {e}")
+                    # logger.error(f"Ошибка при отправке в чат {chat_id}: {e}")
 
         # 2. Рассылка по пользователям
         if user_rows:
@@ -561,7 +561,7 @@ async def mass_mailing_to_all_command(msg: Message):
                 except Exception as e:
                     failed += 1
                     failed_entities.append((f"Пользователь {user_id}", str(e)))
-                    #logger.error(f"Ошибка при отправке пользователю {user_id}: {e}")
+                    # logger.error(f"Ошибка при отправке пользователю {user_id}: {e}")
 
         # Итоговое сообщение
         result_text = (
@@ -589,7 +589,7 @@ async def mass_mailing_to_all_command(msg: Message):
     except Exception as e:
         await msg.reply(f"❌ Произошла ошибка при выполнении полной рассылки:\n\n<code>{str(e)}</code>",
                         parse_mode='HTML')
-        #logger.error(f"Ошибка в команде !все рассылка: {e}", exc_info=True)
+        # logger.error(f"Ошибка в команде !все рассылка: {e}", exc_info=True)
 
 
 # Константы
@@ -632,7 +632,7 @@ async def cleanup_states_worker(bot, state_storage):
                         await state_storage.set_data(key, {})
                         await state_storage.set_state(key, None)
                     del user_last_activity[user_id]
-                    #logger.debug(f"Очищено состояние для пользователя {user_id}")
+                    # logger.debug(f"Очищено состояние для пользователя {user_id}")
                 except Exception as e:
                     logger.error(f"Ошибка при очистке состояния {user_id}: {e}")
 
@@ -693,60 +693,108 @@ async def chat_id_list_command(msg: Message, state: FSMContext):
         logger.error(f"Ошибка в команде !чат ид: {e}", exc_info=True)
 
 
-# ОБРАБОТЧИК КНОПОК - ВАЖНО: без фильтра состояния для коллбэков
-@chat_info_router.callback_query(F.data.startswith("page_"))
-async def process_page_callback(callback: CallbackQuery, state: FSMContext):
-    """Обработка навигации по страницам"""
-    try:
+# ==================== ОБРАБОТЧИКИ ПАГИНАЦИИ ДЛЯ !ид ЧАТОВ ====================
 
+@chat_info_router.callback_query(F.data == "page_prev")
+async def page_prev_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработка кнопки 'Назад' для списка чатов"""
+    try:
+        # Проверяем права доступа
         if callback.from_user.id != sanor_ID:
+            await callback.answer("⛔ Нет доступа", show_alert=True)
             return
 
-        # Проверяем, есть ли состояние у пользователя
+        # Проверяем, есть ли состояние
         current_state = await state.get_state()
         if current_state != ChatListPagination.waiting_for_page.state:
-            await callback.answer("❌ Сессия истекла. Используйте команду !чат ид снова.", show_alert=True)
-            await callback.message.delete()
+            await callback.answer("❌ Сессия истекла. Используйте команду !ид чатов заново.", show_alert=True)
+            try:
+                await callback.message.delete()
+            except:
+                pass
             return
 
         # Обновляем время активности
         user_last_activity[callback.from_user.id] = datetime.now()
 
+        # Получаем текущие данные
         data = await state.get_data()
         current_page = data.get('current_page', 0)
         total_pages = data.get('total_pages', 1)
 
-        if callback.data == "page_prev":
-            new_page = max(0, current_page - 1)
-        elif callback.data == "page_next":
-            new_page = min(total_pages - 1, current_page + 1)
-        else:
-            await callback.answer()
-            return
+        # Переключаем на предыдущую страницу
+        new_page = max(0, current_page - 1)
 
-        # Обновляем страницу
-        await state.update_data(current_page=new_page)
+        if new_page != current_page:
+            # Обновляем страницу
+            await state.update_data(current_page=new_page)
+            # Обновляем сообщение
+            await update_chat_page(callback.message, state)
 
-        # Обновляем сообщение
-        await update_chat_page(callback.message, state)
         await callback.answer()
 
     except Exception as e:
-        logger.error(f"Ошибка в process_page_callback: {e}", exc_info=True)
-        await callback.answer("❌ Произошла ошибка", show_alert=True)
+        logger.error(f"Ошибка в page_prev_callback: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка при переключении страницы", show_alert=True)
 
 
-# Отдельный хендлер для кнопки "Закрыть"
-@chat_info_router.callback_query(F.data == "close")
-async def close_pagination(callback: CallbackQuery, state: FSMContext):
-    """Закрытие пагинации"""
+@chat_info_router.callback_query(F.data == "page_next")
+async def page_next_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработка кнопки 'Вперед' для списка чатов"""
     try:
-
+        # Проверяем права доступа
         if callback.from_user.id != sanor_ID:
+            await callback.answer("⛔ Нет доступа", show_alert=True)
+            return
+
+        # Проверяем, есть ли состояние
+        current_state = await state.get_state()
+        if current_state != ChatListPagination.waiting_for_page.state:
+            await callback.answer("❌ Сессия истекла. Используйте команду !ид чатов заново.", show_alert=True)
+            try:
+                await callback.message.delete()
+            except:
+                pass
+            return
+
+        # Обновляем время активности
+        user_last_activity[callback.from_user.id] = datetime.now()
+
+        # Получаем текущие данные
+        data = await state.get_data()
+        current_page = data.get('current_page', 0)
+        total_pages = data.get('total_pages', 1)
+
+        # Переключаем на следующую страницу
+        new_page = min(total_pages - 1, current_page + 1)
+
+        if new_page != current_page:
+            # Обновляем страницу
+            await state.update_data(current_page=new_page)
+            # Обновляем сообщение
+            await update_chat_page(callback.message, state)
+
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Ошибка в page_next_callback: {e}", exc_info=True)
+        await callback.answer("❌ Ошибка при переключении страницы", show_alert=True)
+
+
+@chat_info_router.callback_query(F.data == "close")
+async def close_chat_list_callback(callback: CallbackQuery, state: FSMContext):
+    """Закрытие списка чатов"""
+    try:
+        # Проверяем права доступа
+        if callback.from_user.id != sanor_ID:
+            await callback.answer("⛔ Нет доступа", show_alert=True)
             return
 
         # Удаляем сообщение
-        await callback.message.delete()
+        try:
+            await callback.message.delete()
+        except:
+            pass
 
         # Очищаем состояние
         await state.clear()
@@ -758,20 +806,29 @@ async def close_pagination(callback: CallbackQuery, state: FSMContext):
         await callback.answer("✅ Список закрыт")
 
     except Exception as e:
-        logger.error(f"Ошибка при закрытии пагинации: {e}")
-        await callback.answer("❌ Ошибка при закрытии")
+        logger.error(f"Ошибка при закрытии списка: {e}")
+        await callback.answer("❌ Ошибка при закрытии", show_alert=True)
 
 
 @chat_info_router.callback_query(F.data == "current")
-async def current_page_info(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != sanor_ID:
-        return
-
+async def current_page_info_callback(callback: CallbackQuery, state: FSMContext):
     """Информация о текущей странице"""
-    data = await state.get_data()
-    current_page = data.get('current_page', 0)
-    total_pages = data.get('total_pages', 1)
-    await callback.answer(f"Страница {current_page + 1} из {total_pages}")
+    try:
+        if callback.from_user.id != sanor_ID:
+            await callback.answer("⛔ Нет доступа", show_alert=True)
+            return
+
+        # Получаем данные
+        data = await state.get_data()
+        current_page = data.get('current_page', 0)
+        total_pages = data.get('total_pages', 1)
+
+        # Показываем информацию
+        await callback.answer(f"📄 Страница {current_page + 1} из {total_pages}", show_alert=False)
+
+    except Exception as e:
+        logger.error(f"Ошибка в current_page_info_callback: {e}")
+        await callback.answer("❌ Ошибка", show_alert=True)
 
 
 async def send_chat_page(message: Message, state: FSMContext):
@@ -825,6 +882,10 @@ async def update_chat_page(message: Message, state: FSMContext):
 
     except Exception as e:
         logger.error(f"Ошибка в update_chat_page: {e}", exc_info=True)
+        try:
+            await message.edit_text("❌ Ошибка при обновлении списка чатов")
+        except:
+            pass
 
 
 async def format_chat_page(all_chats, current_page, total_pages):
@@ -850,26 +911,33 @@ async def format_chat_page(all_chats, current_page, total_pages):
 
 def create_pagination_keyboard(current_page, total_pages):
     """Создание клавиатуры пагинации"""
-    keyboard_buttons = []
+    buttons = []
 
     # Кнопка "Назад"
     if current_page > 0:
-        keyboard_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data="page_prev"))
+        buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data="page_prev"))
+    else:
+        buttons.append(InlineKeyboardButton(text="⬅️", callback_data="current"))
 
     # Кнопка с текущей страницей
-    keyboard_buttons.append(InlineKeyboardButton(
+    buttons.append(InlineKeyboardButton(
         text=f"📄 {current_page + 1}/{total_pages}",
         callback_data="current"
     ))
 
     # Кнопка "Вперед"
     if current_page < total_pages - 1:
-        keyboard_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data="page_next"))
+        buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data="page_next"))
+    else:
+        buttons.append(InlineKeyboardButton(text="➡️", callback_data="current"))
 
-    # Кнопка "Закрыть"
-    keyboard_buttons.append(InlineKeyboardButton(text="❌ Закрыть", callback_data="close"))
+    # Кнопка "Закрыть" в отдельном ряду
+    keyboard = [
+        buttons,
+        [InlineKeyboardButton(text="❌ Закрыть", callback_data="close")]
+    ]
 
-    return InlineKeyboardMarkup(inline_keyboard=[keyboard_buttons])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 # Добавляем новый класс состояний для рассылки сообщений
@@ -1066,6 +1134,7 @@ async def process_recipients_selection(callback: CallbackQuery, state: FSMContex
     """Обработка выбора типа получателей"""
     try:
         if callback.from_user.id != sanor_ID:
+            await callback.answer("⛔ Нет доступа", show_alert=True)
             return
 
         recipients_type = callback.data.split("_")[1]
@@ -1149,6 +1218,7 @@ async def confirm_mass_mailing(callback: CallbackQuery, state: FSMContext):
     """Подтверждение и начало рассылки"""
     try:
         if callback.from_user.id != sanor_ID:
+            await callback.answer("⛔ Нет доступа", show_alert=True)
             return
 
         data = await state.get_data()
@@ -1287,10 +1357,14 @@ async def confirm_mass_mailing(callback: CallbackQuery, state: FSMContext):
 async def cancel_mass_mailing(callback: CallbackQuery, state: FSMContext):
     """Отмена рассылки"""
     if callback.from_user.id != sanor_ID:
+        await callback.answer("⛔ Нет доступа", show_alert=True)
         return
 
     await state.clear()
-    await callback.message.edit_text("❌ Рассылка отменена")
+    try:
+        await callback.message.edit_text("❌ Рассылка отменена")
+    except:
+        pass
     await callback.answer()
 
 

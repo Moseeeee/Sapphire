@@ -72,37 +72,37 @@ async def update_mute_info(chat_id: int, user_id: int, admin_id: int, reason: st
 
 
 async def update_mute_info_type(chat_id: int, user_id: int, time_end: str) -> None:
-    """Сохраняет или обновляет время окончания мута в punishment_time.
-    Для вечных мутов (duration == 'навсегда') не вызывается."""
+    """Сохраняет время окончания мута в punishment_time (столбец time_end имеет тип TEXT)."""
     try:
         from pytz import timezone
         MOSCOW_TZ = timezone('Europe/Moscow')
 
         logger.info(f"update_mute_info_type: chat_id={chat_id}, user_id={user_id}, time_end={time_end}")
 
-        # Преобразуем строку в datetime
+        # Преобразуем строку в datetime для проверки и нормализации, но сохраняем как строку
         try:
             time_end_dt = datetime.fromisoformat(time_end)
         except ValueError:
-            logger.error(f"Invalid time_end format: {time_end}, converting to proper format")
+            # Если пришло не в ISO, пробуем интерпретировать как минуты
             if time_end.isdigit():
                 minutes = int(time_end)
                 time_end_dt = datetime.now(MOSCOW_TZ) + timedelta(minutes=minutes)
             else:
                 time_end_dt = datetime.now(MOSCOW_TZ) + timedelta(hours=1)
 
-        # Приводим к aware datetime с московским поясом
+        # Приводим к московскому времени и переводим обратно в строку ISO
         if time_end_dt.tzinfo is None:
             time_end_dt = MOSCOW_TZ.localize(time_end_dt)
+        time_end_str = time_end_dt.isoformat()
 
         pool = get_db_pool()
         async with pool.acquire() as conn:
-            result = await conn.execute('''
+            await conn.execute('''
                 INSERT INTO punishment_time (chat_id, user_id, types, time_end)
                 VALUES ($1, $2, $3, $4)
                 ON CONFLICT (chat_id, user_id, types) DO UPDATE SET time_end = EXCLUDED.time_end
-            ''', chat_id, user_id, 'mute', time_end_dt)
-            logger.info(f"update_mute_info_type result: {result}")
+            ''', chat_id, user_id, 'mute', time_end_str)   # ← строка, а не datetime
+            logger.info(f"Мут сохранён: chat {chat_id}, user {user_id}, до {time_end_str}")
     except Exception as e:
         logger.error(f"Ошибка в update_mute_info_type: {e}", exc_info=True)
 

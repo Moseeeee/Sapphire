@@ -2,16 +2,13 @@ from datetime import datetime
 import pytz
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.ConnectDataBaseCache import auto_cache_update, cache_lock, memory_cache
 import logging
-
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 
 logger = logging.getLogger(__name__)
 
-
 def format_time(time: datetime) -> str:
     """Форматирует время в строку: 'дд.мм.гггг в чч:мм'"""
     return time.strftime('%d.%m.%Y в %H:%M')
-
 
 def get_moscow_time() -> datetime:
     """Возвращает текущее время в московском часовом поясе."""
@@ -23,7 +20,6 @@ def get_moscow_time() -> datetime:
 # УПРАВЛЕНИЕ ПРИВЕТСТВИЯМИ
 # -------------------------
 
-#@auto_cache_update('welcome', 'chat_id')
 async def add_welcome_text(chat_id: int, welcome_text: str) -> None:
     """Добавляет или обновляет приветствие для чата."""
     try:
@@ -38,9 +34,6 @@ async def add_welcome_text(chat_id: int, welcome_text: str) -> None:
         logger.error(e, exc_info=True)
 
 
-
-
-#@auto_cache_update('welcome', 'chat_id')
 async def delete_welcome_text(chat_id: int) -> None:
     """Удаляет приветствие чата."""
     try:
@@ -52,14 +45,7 @@ async def delete_welcome_text(chat_id: int) -> None:
 
 
 async def check_welcome_text(chat_id: int) -> str | None:
-    """Возвращает текст приветствия (с кэшированием)."""
-    #cache_key = f"welcome_{chat_id}"
-    #async with cache_lock:
-      #  if cache_key in memory_cache:
-      #      text = memory_cache[cache_key].get('welcome_text')
-        #    if text is not None:
-       #         return text
-
+    """Возвращает текст приветствия."""
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
@@ -67,12 +53,7 @@ async def check_welcome_text(chat_id: int) -> str | None:
                 'SELECT welcome_text FROM welcome WHERE chat_id = $1',
                 chat_id
             )
-            welcome_text = row['welcome_text'] if row else None
-
-           # async with cache_lock:
-                #memory_cache[cache_key] = {'chat_id': chat_id, 'welcome_text': welcome_text}
-
-            return welcome_text
+            return row['welcome_text'] if row else None
     except Exception as e:
         logger.error(e, exc_info=True)
         return None
@@ -130,7 +111,6 @@ async def add_full_users_chats_leave(chat_id: int, user_id: int, leave_time: str
     try:
         pool = get_db_pool()
         async with pool.acquire() as conn:
-            # Проверяем существование
             exists = await conn.fetchval(
                 'SELECT 1 FROM full_users_chats WHERE chat_id = $1 AND user_id = $2',
                 chat_id, user_id
@@ -147,7 +127,6 @@ async def add_full_users_chats_leave(chat_id: int, user_id: int, leave_time: str
                     INSERT INTO full_users_chats (chat_id, user_id, join_time, leave_time, member_status)
                     VALUES ($1, $2, $3, $3, 'LEAVE')
                 ''', chat_id, user_id, leave_time)
-
     except Exception as e:
         logger.error(e, exc_info=True)
 
@@ -175,6 +154,5 @@ async def update_full_users_chats_status(chat_id: int, user_id: int, member_stat
                     INSERT INTO full_users_chats (chat_id, user_id, join_time, member_status)
                     VALUES ($1, $2, $3, $4)
                 ''', chat_id, user_id, current_time, member_status)
-
     except Exception as e:
         logger.error(e, exc_info=True)

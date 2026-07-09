@@ -7,6 +7,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from BotAutomaticWork.Middleware.SmartIntRefreshed import SmartInt
 from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import get_db_pool
 from handlers.BotAutomaticWork.Gonfig.config import sanor_ID
 # Импорт обновленных модулей middleware
@@ -252,7 +253,6 @@ def get_ping_db_emoji(db_ping) -> str:
 @server_stats_router.message(F.text.split("\n", 1)[0].lower() == ".бот")
 @server_stats_router.message(F.text.split("\n", 1)[0].lower() == "/бот")
 async def cmd_bots_fast(message: Message):
-    """Оптимизированная команда для быстрого отображения статуса ботов"""
     if message.from_user.id != sanor_ID:
         return
 
@@ -260,7 +260,6 @@ async def cmd_bots_fast(message: Message):
         start_time = time.time()
         bot_data = await _get_all_bot_data()
 
-        # Собираем пинги всех ботов параллельно
         ping_tasks = []
         bot_instances = {}
 
@@ -281,13 +280,11 @@ async def cmd_bots_fast(message: Message):
             best = ping_stats.get("best")
             worst = ping_stats.get("worst")
 
-            # Emoji
             load_emoji = get_load_emoji(d['load_pct'])
             ping_emoji = get_ping_emoji(current_ping)
             queue_info = d.get("queue_info", {})
             worker_status = queue_info.get("worker_running", False)
 
-            # Получаем username текущего бота
             bot_instance = bot_instances[d['bot_id']]
             try:
                 bot_info = await bot_instance.get_me()
@@ -296,12 +293,15 @@ async def cmd_bots_fast(message: Message):
             except:
                 bot_link = f"{d['bot_name']}"
 
+            # ✅ ИСПРАВЛЕНО: убраны лишние фигурные скобки
+            queue_size = queue_info.get('queue_size', 0)
+
             text_parts.append(
                 f"<b>{bot_link}</b>\n"
                 f"{load_emoji} Нагрузка: {d['load_pct']:.1f}%\n"
                 f"{ping_emoji} Пинг: {format_ping(current_ping)} [{format_ping(best) if best else '–'} | {format_ping(worst) if worst else '–'}]\n"
                 f"{'🟢' if worker_status else '🔴'} Воркер: {'активен' if worker_status else 'остановлен'}\n"
-                f"🗃️ Очередь: {queue_info.get('queue_size', 0)}\n"
+                f"🗃️ Очередь: {SmartInt(queue_size)}\n"  # ✅ Убраны лишние скобки
             )
 
         processing_time = time.time() - start_time
@@ -331,7 +331,6 @@ async def _measure_single_bot_ping(bot: Bot) -> float:
 @server_stats_router.message(F.text.split("\n", 1)[0].lower() == "/актив бота")
 @server_stats_router.message(Command("bot_active_5_min"))
 async def cmd_bots_activity(message: Message):
-
     if message.from_user.id != sanor_ID:
         return
 
@@ -339,70 +338,57 @@ async def cmd_bots_activity(message: Message):
         bot_data = await _get_all_bot_data()
         text_parts = [""]
 
-        # Считаем общее количество чатов
         total_chats = sum(d["chat_count"] for d in bot_data)
 
-        # === ДАННЫЕ ЗА 5 МИНУТ ===
         text_parts.append("📊 <b>ДАННЫЕ БОТОВ ЗА 5 МИНУТ:</b>")
         for d in bot_data:
             stats = d["stats"]
             errors = stats.get("error_count", 0)
 
-            # Emoji
             load_emoji = get_load_emoji(d['load_pct'])
-
-            # Доля чатов
             chat_share = (d['chat_count'] / total_chats * 100) if total_chats > 0 else 0
 
-            # Данные за 5 минут (из SuperBotLoadEstimator)
             hist_stats = d["load_history_stats"]
             avg_load = hist_stats["avg_load"]
             max_load = hist_stats["max_load"]
             trend = hist_stats["trend_load"]
             trend_emoji = "↗️" if trend > 1 else "↘️" if trend < -1 else "➡️"
 
-            # === ИСПРАВЛЕНО: RPS за 5 минут (из PerBotRPS) ===
             rps_stats = bot_rps_manager.get_or_create_bot_stats(d['bot_id'])
-            rps_5min = rps_stats.get_rps_stats_for_last_minutes(5)  # Это синхронный вызов
+            rps_5min = rps_stats.get_rps_stats_for_last_minutes(5)
             avg_msg_rps_5min = rps_5min["avg_msg_rps"]
             peak_msg_rps_5min = rps_5min["peak_msg_rps"]
             avg_ups_rps_5min = rps_5min["avg_ups_rps"]
             peak_ups_rps_5min = rps_5min["peak_ups_rps"]
 
-            # Очередь за 5 минут (условно)
-            avg_queue = hist_stats["avg_load"] / 10  # условно: avg_load / 10 = avg_queue
+            avg_queue = hist_stats["avg_load"] / 10
             max_queue = hist_stats["max_load"] / 10
+            avg_ping_internal = hist_stats["avg_handler_time"]
 
-            # Пинги за 5 минут (из SuperBotLoadEstimator, но это не пинги API, а внутренние метрики)
-            avg_ping_internal = hist_stats["avg_handler_time"]  # Это внутреннее время, не пинг API
-
-            # Получаем username текущего бота (для ссылки)
             bot_instance = _get_bot_instance_by_id(d['bot_id'])
             lele = await bot_instance.get_me()
             username = lele.username
             bot_link = f"<a href='https://t.me/{username}'>{d['bot_name']}</a>"
 
             text_parts.append(
-                f"<b>\n{bot_link}</b> ({d['chat_count']})\n"
+                f"<b>\n{bot_link}</b> ({SmartInt(d['chat_count'])})\n"  # ✅ Обёрнуто в SmartInt
                 f"{trend_emoji} Нагрузка: {avg_load:.1f}% ({trend:+.1f}) (пик: {max_load:.1f}%)\n"
                 f"RPS:\n"
-                f"      💬: {avg_msg_rps_5min:.0f} смс (пик: {peak_msg_rps_5min:.0f})\n"  # Используем данные из PerBotRPS
-                f"      👤: {avg_ups_rps_5min:.0f} юзеров (пик:  {peak_ups_rps_5min:.0f})\n"  # Используем данные из PerBotRPS
+                f"      💬: {avg_msg_rps_5min:.0f} смс (пик: {peak_msg_rps_5min:.0f})\n"
+                f"      👤: {avg_ups_rps_5min:.0f} юзеров (пик:  {peak_ups_rps_5min:.0f})\n"
                 f"Очередь: {avg_queue:.0f} сек (пик: {max_queue:.0f} сек)\n"
                 f"Внутр. время: {format_ping(avg_ping_internal) if avg_ping_internal else '–'}\n"
             )
 
-        # === АКТУАЛЬНО СЕЙЧАС ===
         text_parts.append("\n⚡ <b>В ДАННЫЙ МОМЕНТ:</b>")
 
         db_ping = await get_db_ping_ms()
         db_ping_emoji = get_ping_db_emoji(db_ping)
 
-        text_parts.append(f'{db_ping_emoji} Пинг бд: {db_ping}мс\n\n')
+        text_parts.append(f'{db_ping_emoji} Пинг бд: {SmartInt(db_ping)}мс\n\n')  # ✅ Обёрнуто в SmartInt
 
         for d in bot_data:
             stats = d["stats"]
-            # === НОВОЕ: текущие RPS (последней секунды) (из PerBotRPS) ===
             current_msg_rps = stats.get("current_msg_rps", 0)
             current_ups_rps = stats.get("current_ups_rps", 0)
             success_info = stats.get("success_info", "0/0 (0%)")
@@ -411,19 +397,16 @@ async def cmd_bots_activity(message: Message):
             best = ping_stats.get("best")
             worst = ping_stats.get("worst")
 
-            # === ИСПРАВЛЕНО: пинг сейчас для КОНКРЕТНОГО бота ===
             bot_instance = _get_bot_instance_by_id(d['bot_id'])
             start_ping = time.time()
-            await bot_instance.get_me()  # Вызов get_me() для конкретного бота
+            await bot_instance.get_me()
             current_ping = (time.time() - start_ping) * 1000
 
-            # Emoji
             load_emoji = get_load_emoji(d['load_pct'])
             rps_emoji = get_rps_emoji(current_msg_rps)
             ping_emoji = get_ping_emoji(current_ping)
             queue_emoji = get_queue_emoji(d['queue_time'])
 
-            # Получаем username текущего бота (для ссылки)
             lele = await bot_instance.get_me()
             username = lele.username
             bot_link = f"<a href='https://t.me/{username}'>{d['bot_name']}</a>"
@@ -434,7 +417,6 @@ async def cmd_bots_activity(message: Message):
                 f"{rps_emoji} RPS: "
                 f"{current_ups_rps:.0f} людей в сек. "
                 f"({current_msg_rps:.0f} смс в сек.)\n"
-
                 f"{ping_emoji} Пинг: {format_ping(current_ping)} [{format_ping(best) if best else '–'} | {format_ping(worst) if worst else '–'}]\n"
                 f"{queue_emoji} Очередь: {d['queue_time']:.1f}с\n"
             )

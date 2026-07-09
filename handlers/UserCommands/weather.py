@@ -1,11 +1,13 @@
-
 import aiohttp
 import asyncio
+import uuid
 from datetime import datetime
 from typing import Optional, Dict, Tuple
+
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import pytz
 from pyexpat.errors import messages
 
@@ -23,6 +25,9 @@ GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 weather_cache: Dict[str, Tuple[datetime, str]] = {}
 CACHE_TTL = 600  # 10 минут в секундах
 
+# Для кнопки "обновить"
+weather_refresh_state: Dict[str, str] = {}
+
 
 # ---------------------------
 # Эмодзи и вспомогательные функции
@@ -30,34 +35,34 @@ CACHE_TTL = 600  # 10 минут в секундах
 def interpret_weather_code(code: int, is_day: bool = True) -> Tuple[str, str]:
     """Интерпретация кода погоды с эмодзи"""
     codes = {
-        0: ("☀️", "Ясно") if is_day else ("🌙", "Ясно"),
-        1: ("🌤️", "Преимущественно ясно") if is_day else ("☁️", "Преимущ. ясно"),
-        2: ("⛅", "Частично облачно"),
-        3: ("☁️", "Пасмурно"),
-        45: ("🌫️", "Туман"),
-        48: ("🌁", "Инейный туман"),
-        51: ("🌦️", "Легкая морось"),
-        53: ("🌧️", "Умеренная морось"),
-        55: ("🌧️", "Сильная морось"),
-        56: ("🌨️", "Ледяная морось"),
-        57: ("🌨️", "Сильная ледяная морось"),
-        61: ("💧", "Небольшой дождь"),
-        63: ("🌧️", "Умеренный дождь"),
-        65: ("⛈️", "Сильный дождь"),
-        66: ("🧊", "Ледяной дождь"),
-        67: ("🧊", "Сильный ледяной дождь"),
-        71: ("❄️", "Небольшой снег"),
-        73: ("🌨️", "Умеренный снег"),
-        75: ("❄️❄️", "Сильный снег"),
-        77: ("🌨️", "Снежные зерна"),
-        80: ("💧", "Небольшие ливни"),
-        81: ("🌧️", "Умеренные ливни"),
-        82: ("⛈️", "Сильные ливни"),
-        85: ("🌨️💧", "Снежные ливни"),
-        86: ("🌨️💧", "Сильные снежные ливни"),
-        95: ("⚡", "Гроза"),
-        96: ("⚡❄️", "Гроза с градом"),
-        99: ("⚡❄️", "Сильная гроза с градом"),
+        0: ("<tg-emoji emoji-id='5469947168523558652'>☀️</tg-emoji>", "Ясно") if is_day else ("🌙", "Ясно"),
+        1: ("<tg-emoji emoji-id='5283075860188898177'>🌤</tg-emoji>", "Преимущественно ясно") if is_day else ("☁️", "Преимущ. ясно"),
+        2: ("<tg-emoji emoji-id='5283197442123114023'>⛅️</tg-emoji>", "Частично облачно"),
+        3: ("<tg-emoji emoji-id='5287571024500498635'>☁️</tg-emoji>", "Пасмурно"),
+        45: ("<tg-emoji emoji-id='6334544061101246165'>🌫</tg-emoji>", "Туман"),
+        48: ("<tg-emoji emoji-id='5458849741829842481'>🌫</tg-emoji>", "Инейный туман"),
+        51: ("<tg-emoji emoji-id='5283097055852503586'>🌦</tg-emoji>", "Легкая морось"),
+        53: ("<tg-emoji emoji-id='6334638988468422492'>🌧</tg-emoji>", "Умеренная морось"),
+        55: ("<tg-emoji emoji-id='6334638988468422492'>🌧</tg-emoji>", "Сильная морось"),
+        56: ("<tg-emoji emoji-id='5431895003821513760'>❄️</tg-emoji>", "Ледяная морось"),
+        57: ("<tg-emoji emoji-id='5431895003821513760'>❄️</tg-emoji>", "Сильная ледяная морось"),
+        61: ("<tg-emoji emoji-id='6334638988468422492'>🌧</tg-emoji>", "Небольшой дождь"),
+        63: ("<tg-emoji emoji-id='6334638988468422492'>🌧</tg-emoji>", "Умеренный дождь"),
+        65: ("<tg-emoji emoji-id='6332360083116132292'>⛈</tg-emoji>", "Сильный дождь"),
+        66: ("<tg-emoji emoji-id='5458521056572611622'>🌧</tg-emoji>", "Ледяной дождь"),
+        67: ("<tg-emoji emoji-id='5458521056572611622'>🌧</tg-emoji>", "Сильный ледяной дождь"),
+        71: ("<tg-emoji emoji-id='5282833267551117457'>🌨</tg-emoji>", "Небольшой снег"),
+        73: ("<tg-emoji emoji-id='5282833267551117457'>🌨</tg-emoji>", "Умеренный снег"),
+        75: ("<tg-emoji emoji-id='5282833267551117457'>🌨</tg-emoji>", "Сильный снег"),
+        77: ("<tg-emoji emoji-id='5282833267551117457'>🌨</tg-emoji>", "Снежные зерна"),
+        80: ("<tg-emoji emoji-id='6334638988468422492'>🌧</tg-emoji>", "Небольшие ливни"),
+        81: ("<tg-emoji emoji-id='6334751585331054055'>🌧</tg-emoji>", "Умеренные ливни"),
+        82: ("<tg-emoji emoji-id='6332360083116132292'>⛈</tg-emoji>", "Сильные ливни"),
+        85: ("<tg-emoji emoji-id='5458521056572611622'>🌧</tg-emoji>", "Снежные ливни"),
+        86: ("<tg-emoji emoji-id='5458521056572611622'>🌧</tg-emoji>", "Сильные снежные ливни"),
+        95: ("<tg-emoji emoji-id='5282731554135615450'>🌩</tg-emoji>", "Гроза"),
+        96: ("<tg-emoji emoji-id='5282731554135615450'>🌩</tg-emoji>", "Гроза с градом"),
+        99: ("<tg-emoji emoji-id='5282731554135615450'>🌩</tg-emoji>", "Сильная гроза с градом"),
     }
     return codes.get(code, ("❓", "Неизвестно"))
 
@@ -65,41 +70,41 @@ def interpret_weather_code(code: int, is_day: bool = True) -> Tuple[str, str]:
 def temp_emoji(temp: float) -> str:
     """Эмодзи в зависимости от температуры"""
     if temp < -20:
-        return "🥶"
+        return "<tg-emoji emoji-id='5404728536810398694'>🥶</tg-emoji>"
     elif temp < -10:
-        return "❄️"
+        return "<tg-emoji emoji-id='5471950641918121951'>☃️</tg-emoji>"
     elif temp < 0:
-        return "☃️"
+        return "<tg-emoji emoji-id='5449449325434266744'>❄️</tg-emoji>"
     elif temp < 10:
         return "🧣"
     elif temp < 15:
         return "🧥"
     elif temp < 20:
-        return "🌤️"
+        return "<tg-emoji emoji-id='5283075860188898177'>🌤</tg-emoji>"
     elif temp < 25:
-        return "😎"
+        return "<tg-emoji emoji-id='5458842406025699616'>☀️</tg-emoji>"
     elif temp < 30:
-        return "🔥"
+        return "<tg-emoji emoji-id='6334402121022048240'>🔥</tg-emoji>"
     elif temp < 35:
-        return "♨️"
+        return "<tg-emoji emoji-id='5465432711218863135'>♨️</tg-emoji>"
     else:
-        return "🌋"
+        return "<tg-emoji emoji-id='5188649101515827817'>🌋</tg-emoji>"
 
 
 def wind_emoji(speed: float) -> str:
     """Эмодзи в зависимости от скорости ветра"""
     if speed < 0.5:
-        return "🍃"
+        return "<tg-emoji emoji-id='5253944419870062295'>🍃</tg-emoji>"
     elif speed < 2:
-        return "🪁"
+        return "<tg-emoji emoji-id='5233706705769997857'>🪁</tg-emoji>"
     elif speed < 5:
-        return "🌬️"
+        return "<tg-emoji emoji-id='6334814175889459151'>🌬</tg-emoji>"
     elif speed < 10:
-        return "💨"
+        return "<tg-emoji emoji-id='5458875859525970449'>💨</tg-emoji>"
     elif speed < 15:
-        return "🌪️"
+        return "<tg-emoji emoji-id='6332347924063717264'>🌪</tg-emoji>"
     else:
-        return "🌀"
+        return "<tg-emoji emoji-id='6334446006997877909'>🌀</tg-emoji>"
 
 
 def wind_direction_emoji(deg: float) -> str:
@@ -125,59 +130,59 @@ def wind_direction_emoji(deg: float) -> str:
 def uv_index_emoji(uv: float) -> str:
     """Эмодзи UV-индекса"""
     if uv < 3:
-        return "🟢"
+        return "<tg-emoji emoji-id='5449380056201697322'>💚</tg-emoji>"
     elif uv < 6:
-        return "🟡"
+        return "<tg-emoji emoji-id='5449366943666543715'>💛</tg-emoji>"
     elif uv < 8:
-        return "🟠"
+        return "<tg-emoji emoji-id='5449599833973203438'>🧡</tg-emoji>"
     elif uv < 11:
-        return "🔴"
+        return "<tg-emoji emoji-id='5434006487053655876'>❤️</tg-emoji>"
     else:
-        return "🟣⚡"
+        return "<tg-emoji emoji-id='5471954395719539651'>💔</tg-emoji>"
 
 
 def cloud_emoji(cover: float) -> str:
     """Эмодзи облачности"""
     if cover < 10:
-        return "☀️"
+        return "<tg-emoji emoji-id='5469947168523558652'>☀️</tg-emoji>"
     elif cover < 30:
-        return "🌤️"
+        return "<tg-emoji emoji-id='5283075860188898177'>🌤</tg-emoji>"
     elif cover < 70:
-        return "⛅"
+        return "<tg-emoji emoji-id='5283155153875116393'>🌥</tg-emoji>"
     elif cover < 90:
-        return "☁️"
+        return "<tg-emoji emoji-id='5287571024500498635'>☁️</tg-emoji>"
     else:
-        return "🌫️☁️"
+        return "<tg-emoji emoji-id='5287571024500498635'>☁️</tg-emoji>"
 
 
 def visibility_emoji(vis: float) -> str:
     """Эмодзи видимости"""
     if vis > 10:
-        return "✨"
+        return "<tg-emoji emoji-id='5372846474881146350'>🔭</tg-emoji>"
     elif vis > 5:
-        return "👀"
+        return "<tg-emoji emoji-id='5424892643760937442'>👁</tg-emoji>"
     elif vis > 2:
-        return "🌫️"
+        return "<tg-emoji emoji-id='5424885441100782420'>👀</tg-emoji>"
     elif vis > 1:
-        return "🌁"
+        return "<tg-emoji emoji-id='6334544061101246165'>🌫</tg-emoji>"
     else:
-        return "🚫👀"
+        return "<tg-emoji emoji-id='5188311512791393083'>🔎</tg-emoji>"
 
 
 def precipitation_emoji(precip: float) -> str:
     """Эмодзи осадков"""
     if precip == 0:
-        return "☀️"
+        return "<tg-emoji emoji-id='5469947168523558652'>☀️</tg-emoji>"
     elif precip < 2:
-        return "🌦️"
+        return "<tg-emoji emoji-id='5283097055852503586'>🌦</tg-emoji>"
     elif precip < 10:
-        return "🌧️"
+        return "<tg-emoji emoji-id='5283243028905994049'>🌧</tg-emoji>"
     elif precip < 20:
-        return "⛈️"
+        return "<tg-emoji emoji-id='6332360083116132292'>⛈</tg-emoji>"
     elif precip < 50:
-        return "🌊"
+        return "<tg-emoji emoji-id='6334423144886961819'>🌊</tg-emoji>"
     else:
-        return "☔⚡"
+        return "<tg-emoji emoji-id='6332360083116132292'>⛈</tg-emoji>"
 
 
 def format_date(date_str: str) -> str:
@@ -190,6 +195,40 @@ def format_date(date_str: str) -> str:
         return f"{days_ru[dt.weekday()]}, {dt.day} {months_ru[dt.month - 1]}"
     except:
         return date_str
+
+
+def plural_ru(n: int, forms: Tuple[str, str, str]) -> str:
+    """Правильное окончание для русского языка"""
+    n = abs(n) % 100
+    n1 = n % 10
+    if 11 <= n <= 19:
+        return forms[2]
+    if 2 <= n1 <= 4:
+        return forms[1]
+    if n1 == 1:
+        return forms[0]
+    return forms[2]
+
+
+def build_refresh_keyboard(token: str) -> InlineKeyboardMarkup:
+    """Кнопка обновления"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 Обновить",
+                    callback_data=f"weather_refresh:{token}"
+                )
+            ]
+        ]
+    )
+
+
+def register_refresh_state(city: str) -> str:
+    """Регистрируем город для кнопки обновления"""
+    token = uuid.uuid4().hex[:10]
+    weather_refresh_state[token] = city
+    return token
 
 
 # ---------------------------
@@ -323,12 +362,12 @@ def format_weather(data: dict, city_name: str) -> str:
         date_str = format_date(datetime.fromtimestamp(daily["time"][i]).strftime("%Y-%m-%d"))
 
         # Эмодзи для осадков
-        precip_emoji = "☔" if precip_prob > 30 else "💧" if precip_prob > 0 else "🌤️"
+        precip_emoji = "<tg-emoji emoji-id='6334768713660631269'>☔️</tg-emoji>" if precip_prob > 30 else "<tg-emoji emoji-id='6334546560772213058'>💧</tg-emoji>" if precip_prob > 0 else "<tg-emoji emoji-id='5283075860188898177'>🌤</tg-emoji>"
 
         forecast_days.append(
             f"<b>{date_str}</b>\n"
             f"{day_emoji} {day_desc}\n{temp_emoji(day_max)} {day_min}° → {day_max}°\n"
-            f"{precip_emoji} {precip_prob}%\n💨 {wind_emoji(wind_max)} {wind_max} м/с"
+            f"{precip_emoji} {precip_prob}%\n{wind_emoji(wind_max)} {wind_max} м/с"
         )
 
     # Эмодзи для времени суток
@@ -338,35 +377,28 @@ def format_weather(data: dict, city_name: str) -> str:
 
     # Формируем итоговое сообщение
     message = (
-        f"🌤️ <b>ПОГОДА В {city_name.upper()}</b>\n"
-        f"🗓️ {data['weekday']}, {data['current_date']} | 🕒 {data['current_time']}\n\n"
+        f"📡 <b>ПОГОДА В {city_name.upper()}</b>\n"
+        f"<tg-emoji emoji-id='5429337960682113944'>🗓</tg-emoji> {data['weekday']}, {data['current_date']} | 🕒 {data['current_time']}\n\n"
 
         f"<b>{emoji} {desc.upper()} (облачность {cloud_cover}%)</b>\n"
         f"{temp_emoji_str} <b>{temp}°C</b> (ощущается как {feels}°C)\n\n"
 
-        f"💧 <b>Влажность:</b> {humidity}% (осадки {precipitation}мм)\n"
+        f"<tg-emoji emoji-id='5384177187018519962'>💧</tg-emoji> <b>Влажность:</b> {humidity}% (осадки {precipitation}мм)\n"
         f"{wind_direction_emoji(wind_dir)} <b>Ветер:</b> {wind_speed} м/с (порывы до {wind_gust} м/с)\n"
-        #f"💫 <b>Порывы:</b> до {wind_gust} м/с\n"
         f"📊 <b>Давление:</b> {pressure} гПа\n"
         f"{visibility_emoji(visibility)} <b>Видимость:</b> {visibility} км\n"
         f"{uv_index_emoji(uv_index)} <b>UV-индекс:</b> {uv_index}\n\n"
-        #f"{precipitation_emoji(precipitation)} <b>Осадки:</b> {precipitation} мм\n"
-        #f"{cloud_emoji(cloud_cover)} <b>Облачность:</b> {cloud_cover}%\n\n"
 
+        f"<tg-emoji emoji-id='5366340737594051897'>⌚️</tg-emoji> <b>ПРОГНОЗ ПО ЧАСАМ</b>\n"
+        f"<blockquote expandable>{today_forecast_text}</blockquote>\n\n"
 
-        f"🕒 <b>ПРОГНОЗ ПО ЧАСАМ</b>\n"
-        f"{today_forecast_text}\n\n"
-
-
-        f"📅 <b>ПРОГНОЗ НА 5 ДНЕЙ</b>\n"
+        f"<tg-emoji emoji-id='5429337960682113944'>🗓</tg-emoji> <b>ПРОГНОЗ НА 5 ДНЕЙ</b>\n"
     )
 
-    # Добавляем прогноз по дням
-    message += "\n\n".join(forecast_days)
+    forecast_days_text = "\n\n".join(forecast_days)
+    message += f"<blockquote expandable>{forecast_days_text}</blockquote>\n\n"
 
-    message += f"\n\n{'═' * 27}\n"
     message += f"💫 Обновлено: {datetime.now().strftime('%H:%M:%S')}\n"
-    #message += f"📡 Источник: Open-Meteo.com"
 
     return message
 
@@ -465,8 +497,13 @@ async def slash_weather_handler(message: Message):
     await obloko.delete()
 
     if weather:
+        token = register_refresh_state(city)
         try:
-            await message.answer(weather, parse_mode="HTML")
+            await message.answer(
+                weather,
+                parse_mode="HTML",
+                reply_markup=build_refresh_keyboard(token)
+            )
         except Exception as e:
             if "message is too long" in str(e):
                 # Если сообщение слишком длинное, отправляем частями
@@ -474,7 +511,14 @@ async def slash_weather_handler(message: Message):
                 for i, part in enumerate(parts):
                     if i > 0:
                         await asyncio.sleep(0.5)
-                    await message.answer(part, parse_mode="HTML")
+                    if i == 0:
+                        await message.answer(
+                            part,
+                            parse_mode="HTML",
+                            reply_markup=build_refresh_keyboard(token)
+                        )
+                    else:
+                        await message.answer(part, parse_mode="HTML")
             else:
                 await message.answer(f"❌ Ошибка при отправке: {str(e)}")
     else:
@@ -511,19 +555,24 @@ async def exclamation_weather_handler(message: Message):
 
     weather = await process_weather_command(city)
 
-
     await processing_msg.delete()
     await obloko.delete()
 
     if weather:
+        token = register_refresh_state(city)
         try:
-            await message.answer(weather, parse_mode="HTML")
+            await message.answer(
+                weather,
+                parse_mode="HTML",
+                reply_markup=build_refresh_keyboard(token)
+            )
         except Exception as e:
             await message.answer(f"❌ Ошибка: {str(e)}")
     else:
         await message.answer(
             "❌ <b>Не удалось найти город</b>\n\nПопробуйте указать точное название или добавить страну",
-            parse_mode="HTML")
+            parse_mode="HTML"
+        )
 
 
 @weather_router.message(F.text.startswith(".погода "))
@@ -531,7 +580,6 @@ async def dot_weather_handler(message: Message):
     if message.chat.type != 'private':
         if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 59):
             return
-
 
     """Обработчик .погода [город]"""
     city = message.text[8:].strip()
@@ -549,13 +597,64 @@ async def dot_weather_handler(message: Message):
     await obloko.delete()
 
     if weather:
+        token = register_refresh_state(city)
         try:
-            await message.answer(weather, parse_mode="HTML")
+            await message.answer(
+                weather,
+                parse_mode="HTML",
+                reply_markup=build_refresh_keyboard(token)
+            )
         except Exception as e:
             await message.answer(f"❌ Ошибка: {str(e)}")
     else:
         await message.answer("❌ <b>Магия не сработала!</b>\n\nПроверьте название города и попробуйте снова",
                              parse_mode="HTML")
+
+
+@weather_router.callback_query(F.data.startswith("weather_refresh:"))
+async def weather_refresh_handler(callback: CallbackQuery):
+    token = callback.data.split(":", 1)[1]
+    city = weather_refresh_state.get(token)
+
+    if not city:
+        await callback.answer("Эта кнопка устарела.", show_alert=True)
+        return
+
+    # Проверяем кэш или получаем новые данные
+    cache_key = city.lower()
+
+    if cache_key in weather_cache:
+        timestamp, _ = weather_cache[cache_key]
+        age = int((datetime.now() - timestamp).total_seconds())
+        remaining = CACHE_TTL - age
+
+        if remaining > 0:
+            minutes, seconds = divmod(remaining, 60)
+            warning_text = (
+                f"⚠️ Данные еще актуальны!\n"
+                f"Обновление будет доступно через: "
+                f"{minutes} {plural_ru(minutes, ('минуту', 'минуты', 'минут'))} "
+                f"{seconds} {plural_ru(seconds, ('секунду', 'секунды', 'секунд'))}"
+            )
+            await callback.answer(warning_text, show_alert=True)
+            return
+
+    # Если время кэша истекло, выполняем обновление
+    weather = await process_weather_command(city)
+
+    if not weather:
+        await callback.answer("Не удалось обновить погоду.", show_alert=True)
+        return
+
+    try:
+        await callback.message.edit_text(
+            weather,
+            parse_mode="HTML",
+            reply_markup=build_refresh_keyboard(token)
+        )
+        await callback.answer("Данные обновлены!")
+    except Exception as e:
+        await callback.answer(f"Ошибка обновления: {str(e)}", show_alert=True)
 
 
 @weather_router.message(F.text.startswith(".кеш погоды"))
@@ -587,7 +686,6 @@ async def weather_cache_handler(message: Message):
         response += "\n".join(stats)
     else:
         response += "📭 Кэш пока пуст"
-
 
     await obloko.delete()
     await message.answer(response, parse_mode="HTML")

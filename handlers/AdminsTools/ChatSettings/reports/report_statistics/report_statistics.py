@@ -4,6 +4,7 @@ import logging
 from aiogram import Router, types
 from aiogram.filters import Command
 
+from BotAutomaticWork.Middleware.SmartIntRefreshed import SmartInt
 from handlers.AdminsTools.ChatSettings.reports.report_statistics.report_statisticsDB import get_active_user_ids_in_chat, \
     get_moderation_stats_by_user_ids, get_all_user_ids_in_chat, get_pending_reports_for_chats
 from handlers.AdminsTools.ChatSettings.reports.reportsDB import check_reports_chats_db
@@ -55,13 +56,13 @@ async def show_moderation_stats(message: types.Message):
 
     stats = await get_moderation_stats_by_user_ids(chat_id, active_user_ids)
     if not stats:
-        await message.answer("📊 Статистика модерации пуста")
+        await message.answer("Статистика модерации пуста")
         return
 
     result_text = "📊 <b>Статистика модерации (активные участники)</b>\n\n"
     for i, (user_id, day, week, month, year, total) in enumerate(stats, 1):
         user_link = await user_link_with_pseudonym(user_id, chat_id)
-        result_text += f"{i}. {user_link}: {day} | {week} | {month} | {year} | {total}\n\n"
+        result_text += SmartInt(f"<b>{i}. {user_link}:</b> {day} | {week} | {month} | {year} | {total}\n\n")
 
     await message.answer(result_text, parse_mode='HTML', disable_web_page_preview=True)
 
@@ -84,18 +85,18 @@ async def show_all_moderation_stats(message: types.Message):
 
     all_user_ids = await get_all_user_ids_in_chat(chat_id)
     if not all_user_ids:
-        await message.answer("❌ В базе нет данных об участниках этого чата")
+        await message.answer("В базе нет данных об участниках этого чата")
         return
 
     stats = await get_moderation_stats_by_user_ids(chat_id, all_user_ids)
     if not stats:
-        await message.answer("📊 Статистика модерации пуста")
+        await message.answer("Статистика модерации пуста")
         return
 
     result_text = "📊 <b>Статистика модерации (все участники)</b>\n\n"
     for i, (user_id, day, week, month, year, total) in enumerate(stats, 1):
         user_link = await user_link_with_pseudonym(user_id, chat_id)
-        result_text += f"{i}. {user_link}: {day} | {week} | {month} | {year} | {total}\n\n"
+        result_text += f"<b>{i}. {user_link}:</b> {day} | {week} | {month} | {year} | {total}\n\n"
 
     await message.answer(result_text, parse_mode='HTML', disable_web_page_preview=True)
 
@@ -116,7 +117,7 @@ async def show_pending_reports(message: types.Message):
     report_chats = await check_reports_chats_db(chat_id)
 
     if not report_chats:
-        await message.reply("❌ Для этого чата не настроены чаты для жалоб.")
+        await message.reply("Для этого чата не настроены чаты для жалоб.")
         return
 
     reports = await get_pending_reports_for_chats(report_chats)
@@ -140,7 +141,7 @@ async def send_report_page(message, chat_id, page_number):
     """Отправляет/редактирует страницу с жалобами."""
     if chat_id not in report_pages:
         await (message.answer if hasattr(message, 'answer') else message.reply)(
-            "❌ Данные устарели. Запросите список жалоб снова."
+            "Данные устарели. Запросите список жалоб снова."
         )
         return None
 
@@ -176,7 +177,7 @@ async def send_report_page(message, chat_id, page_number):
             f"🔗 Ссылки: <a href='{link_sms}'>Проверить репорт</a> | <a href='{reported_link_sms}'>К сообщению</a>\n\n"
         )
 
-    report_list += f"📊 Всего жалоб: {len(reports)} ({page_number + 1} из {total_pages})"
+    report_list += f"<b>Всего жалоб:</b> {len(reports)} ({page_number + 1} из {total_pages})"
     keyboard = create_simple_pagination_keyboard(page_number, total_pages)
 
     if hasattr(message, 'message'):  # callback
@@ -185,7 +186,7 @@ async def send_report_page(message, chat_id, page_number):
             return message.message
         except Exception as e:
             logger.error(e, exc_info=True)
-            await message.answer("❌ Не удалось обновить сообщение")
+            await message.answer("Не удалось обновить сообщение")
             return None
     else:  # обычное сообщение
         return await message.reply(report_list, reply_markup=keyboard, parse_mode="HTML", disable_web_page_preview=True)

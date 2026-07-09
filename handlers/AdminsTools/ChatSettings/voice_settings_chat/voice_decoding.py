@@ -8,8 +8,10 @@ from aiogram.filters import Command
 from aiogram.types import ReplyParameters
 from faster_whisper import WhisperModel
 
+from handlers.AdminsTools.ChatSettings.voice_settings_chat.voice_settingsDB import check_status_voice_settings
 from handlers.BotAutomaticWork.Gonfig.config import sanor_ID
-from handlers.BotAutomaticWork.universal_bot import bot
+from handlers.BotAutomaticWork.universal_bot import bot  # Импортируем функцию проверки
+from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 
 # ================= КОНФИГУРАЦИЯ =================
 MODEL_SIZE = "small"
@@ -40,7 +42,7 @@ def load_model():
         raise e
 
 
-load_model()
+#load_model()
 
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
@@ -118,6 +120,7 @@ async def send_long_text_chain(message: types.Message, full_text: str, reply_to_
                 except Exception as e:
                     logger.warning(
                         f"Не удалось отредактировать сообщение (возможно, текст слишком длинный для одного сообщения или изменился контент): {e}")
+                    await message.reply('Произошла ошибка')
                     # Если редактирование не удалось (например, текст стал слишком длинным при добавлении заголовка),
                     # просто отправим новое сообщение следом, чтобы не ломать поток.
 
@@ -143,6 +146,7 @@ async def send_long_text_chain(message: types.Message, full_text: str, reply_to_
 
 
 async def process_voice(voice: types.Voice, message: types.Message):
+    """Обработка голосового сообщения"""
     file_id = voice.file_id
     temp_path = None
     status_message = None
@@ -151,16 +155,16 @@ async def process_voice(voice: types.Voice, message: types.Message):
         # 1. ОТПРАВЛЯЕМ СТАТУСНОЕ СООБЩЕНИЕ
         status_text = "🎙 Распознаю . . ."
         status_message = await message.answer(status_text)
-        logger.info(f"Статус отправлен user_{message.from_user.id}, msg_id={status_message.message_id}")
+        #logger.info(f"Статус отправлен user_{message.from_user.id}, msg_id={status_message.message_id}")
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp_file:
             temp_path = tmp_file.name
 
         await bot.download(file_id, destination=temp_path)
-        logger.info(f"Файл скачан: {temp_path}")
+        #logger.info(f"Файл скачан: {temp_path}")
 
         async with semaphore:
-            logger.info(f"Начало обработки файла от user_{message.from_user.id}")
+         #   logger.info(f"Начало обработки файла от user_{message.from_user.id}")
             loop = asyncio.get_event_loop()
 
             # 2. ЗАПУСКАЕМ РАСПОЗНАВАНИЕ (блокирующая операция в потоке)
@@ -173,7 +177,7 @@ async def process_voice(voice: types.Voice, message: types.Message):
                     text="⚠️ Не удалось распознать речь (возможно, там тишина или сильный шум)."
                 )
             else:
-                logger.info(f"Успешная расшифровка ({len(text)} симв.) для user_{message.from_user.id}")
+                #logger.info(f"Успешная расшифровка ({len(text)} симв.) для user_{message.from_user.id}")
                 # 3. ОБНОВЛЯЕМ СООБЩЕНИЕ ИЛИ ОТПРАВЛЯЕМ ЦЕПОЧКУ
                 await send_long_text_chain(
                     message,
@@ -185,7 +189,7 @@ async def process_voice(voice: types.Voice, message: types.Message):
             gc.collect()
 
     except Exception as e:
-        logger.error(f"Критическая ошибка в process_voice: {e}", exc_info=True)
+        #logger.error(f"Критическая ошибка в process_voice: {e}", exc_info=True)
         error_text = "❌ Произошла ошибка при обработке. Попробуйте позже."
         try:
             if status_message:
@@ -202,18 +206,37 @@ async def process_voice(voice: types.Voice, message: types.Message):
         if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-                logger.debug(f"Временный файл удален: {temp_path}")
+       #         logger.debug(f"Временный файл удален: {temp_path}")
             except Exception as e:
                 logger.warning(f"Не удалось удалить файл {temp_path}: {e}")
 
 
-@decoding.message(Command("гс"))
+@decoding.message(F.text.split("\n", 1)[0].lower() == '.гс')
+@decoding.message(F.text.split("\n", 1)[0].lower() == '!гс')
+@decoding.message(F.text.split("\n", 1)[0].lower() == '/гс')
 async def cmd_transcribe_reply(message: types.Message):
-
-    if message.from_user.id != sanor_ID:
+    """Обработка команды /гс в ответ на сообщение"""
+    if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 80):
         return
+
     if not message.reply_to_message:
         await message.answer("Пожалуйста, используйте эту команду как <b>ответ</b> на голосовое сообщение.")
+        return
+
+    # Проверяем включены ли голосовые в чате
+    voice_settings = await check_status_voice_settings(message.chat.id)
+
+    # Handle both dictionary and string return types
+    is_enabled = False
+    if voice_settings:
+        if isinstance(voice_settings, dict):
+            is_enabled = voice_settings.get('voice') == "yes"
+        else:
+            # If it's a string, assume it's the status directly
+            is_enabled = voice_settings == "yes"
+
+    # Если функция отключена - сообщаем пользователю
+    if not is_enabled:
         return
 
     if message.reply_to_message.voice:
@@ -224,7 +247,23 @@ async def cmd_transcribe_reply(message: types.Message):
         await message.answer("В ответном сообщении нет голосового аудио 🤷‍♂️")
 
 
-#@decoding.message(F.voice)
-#async def handle_voice_direct(message: types.Message):
- #   print('ГС ПРИНЯТ 🎙')
-  #  await process_voice(message.voice, message)
+@decoding.message(F.voice)
+async def handle_voice_direct(message: types.Message):
+    """Автоматическая обработка голосовых сообщений"""
+    # Проверяем включены ли голосовые в чате
+    voice_settings = await check_status_voice_settings(message.chat.id)
+
+    # Handle both dictionary and string return types
+    is_enabled = False
+    if voice_settings:
+        if isinstance(voice_settings, dict):
+            is_enabled = voice_settings.get('voice') == "yes"
+        else:
+            # If it's a string, assume it's the status directly
+            is_enabled = voice_settings == "yes"
+
+    # If disabled, silently ignore (no response for auto-handler)
+    if not is_enabled:
+        return
+
+    await process_voice(message.voice, message)

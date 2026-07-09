@@ -17,6 +17,9 @@ from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL
 from handlers.BotAutomaticWork.BotCreatedGlobal import get_bot_by_token
 from handlers.BotAutomaticWork.Gonfig.multi_bot_config import MultiBotConfig
 
+# Безопасный импорт хука мгновенного онлайна под любую конфигурацию PYTHONPATH
+from handlers.BotAutomaticWork.users.checks.check_users_status_online.check_online_statusDB import track_user_online_instant
+
 logger = logging.getLogger(__name__)
 MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 
@@ -76,32 +79,31 @@ class UpdateChatUserMiddleware(BaseMiddleware):
                 # Записываем уникального пользователя для RPS
                 bot_rps_manager.record_unique_user(self.bot_id, user_id)
 
+                # === Мгновенный In-Memory трекинг онлайна (O(1)) ===
+                asyncio.create_task(track_user_online_instant(user_id))
+                # ==========================================================
+
                 # Проверяем наличие текста для фильтрации ссылок
                 if event.message and (event.message.text or event.message.caption):
-                    # Выполняем проверку через основной хендлер
                     from handlers.AdminsTools.ChatSettings.settings_link_filter.links_filter import \
                         check_links_in_message
                     was_blocked = await check_links_in_message(event.message)
 
-                    # Если ссылки были заблокированы, прерываем дальнейшую обработку
                     if was_blocked:
                         bot_rps_manager.record_handled(self.bot_id)
                         return None
 
-                # Для обычных событий
-                result = await self._process_regular_event(handler, event, data, user_id, name, username, chat, chat_id)
-
-
-                # Для ChatMemberUpdated - обрабатываем СРАЗУ и полностью
+                # === Обрабатываем ChatMemberUpdated и СРАЗУ выходим ===
                 if event.chat_member:
                     result = await self._process_chat_member_update(event, user_id, name, username, chat, chat_id)
                     bot_rps_manager.record_handled(self.bot_id)
                     return result
 
-                # ИСПРАВЛЕНО: Обновляем статистику сообщений только для обычных сообщений, не для CallbackQuery
-                # и не для событий чата, а только для групповых чатов
-                if (event.message and chat and hasattr(chat, 'type') and
-                        chat.type != 'private'):
+                # === Для остальных обычных событий ===
+                result = await self._process_regular_event(handler, event, data, user_id, name, username, chat, chat_id)
+
+                # Обновляем статистику сообщений только для обычных сообщений в групповых чатах
+                if (event.message and chat and hasattr(chat, 'type') and chat.type != 'private'):
                     asyncio.create_task(self._update_additional_stats(user_id, chat))
 
                 bot_rps_manager.record_handled(self.bot_id)
@@ -192,9 +194,9 @@ class UpdateChatUserMiddleware(BaseMiddleware):
             is_join = False
             is_leave = False
 
-            # Присоединение
+            # Присоединение (ИСПРАВЛЕНО: учитываем дефолтные ограничения RESTRICTED при входе)
             if (old_status in [ChatMemberStatus.LEFT, ChatMemberStatus.KICKED, None] and
-                    new_status == ChatMemberStatus.MEMBER):
+                    new_status in [ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED]):
                 is_join = True
 
             # Выход
@@ -213,7 +215,7 @@ class UpdateChatUserMiddleware(BaseMiddleware):
                   new_status == ChatMemberStatus.LEFT):
                 is_leave = True
 
-            # Изменение restricted статуса
+            # Изменение restricted статуса внутри чата
             elif old_status == ChatMemberStatus.RESTRICTED and new_status == ChatMemberStatus.RESTRICTED:
                 old_is_member = getattr(event.old_chat_member, 'is_member', False)
                 new_is_member = getattr(event.new_chat_member, 'is_member', False)
@@ -289,8 +291,6 @@ class UpdateChatUserMiddleware(BaseMiddleware):
     async def _update_additional_stats(self, user_id: int, chat: Any):
         """Обновление дополнительной статистики в фоне"""
         try:
-            # Обновляем статистику сообщений ТОЛЬКО для обычных сообщений
-            # Не вызываем это для CallbackQuery и других типов событий
             await increment_message(chat.id, user_id)
         except Exception as e:
             logger.error(f"Error updating additional stats for user {user_id}: {e}")

@@ -25,12 +25,13 @@ from handlers.BotAutomaticWork.Gonfig.config import boss_agent
 from handlers.BotAutomaticWork.parse_time_auto import format_duration, parse_time_string
 from handlers.BotAutomaticWork.universal_bot import bot
 from handlers.BotAutomaticWork.users.GenderUtils import g
-from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
+from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang, \
+    check_user_access
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
-from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
+from BotAutomaticWork.users.checks.check_UserId.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
-from handlers.sanor_commands.payment.payment import check_user_access
+
 
 bans = Router()
 
@@ -101,7 +102,7 @@ async def parse_time_improved_ban(time_str: str):
         return None
 
     time_str = time_str.lower().strip()
-    logger.info(f"Парсинг улучшенный (бан): '{time_str}'")
+    #logger.info(f"Парсинг улучшенный (бан): '{time_str}'")
 
     # Специальные случаи
     if time_str in ["навсегда", "permanent", "forever", "навечно", "вечно"]:
@@ -136,7 +137,7 @@ async def parse_time_improved_ban(time_str: str):
             try:
                 value = int(match)
                 total_seconds += value * multiplier
-                logger.info(f"Найдено: {value} {unit_name} = {value * multiplier} секунд")
+                #logger.info(f"Найдено: {value} {unit_name} = {value * multiplier} секунд")
             except ValueError:
                 continue
 
@@ -151,7 +152,7 @@ async def parse_time_improved_ban(time_str: str):
         if parsed is not None:
             return parsed
 
-    logger.warning(f"Не удалось распарсить время (бан): '{time_str}'")
+    #logger.warning(f"Не удалось распарсить время (бан): '{time_str}'")
     return None
 
 # ======================
@@ -173,7 +174,7 @@ async def set_default_ban_period(m: Message):
     parts = text.split(maxsplit=2)
     if len(parts) < 3:
         await m.answer(
-            "❌ Укажите длительность бана по умолчанию.\n"
+            "<b>Укажите длительность бана по умолчанию.</b>\n"
             "Пример: <code>баны период 3 дня</code>\n"
             "Или: <code>баны период навсегда</code>",
             parse_mode="HTML"
@@ -190,7 +191,7 @@ async def set_default_ban_period(m: Message):
     parsed_duration = parse_time_string(duration_input)
     if parsed_duration is None:
         await m.answer(
-            "❌ Не удалось распознать время. Используйте формат: <code>1 день 2 часа 30 минут</code>",
+            "<b>Не удалось распознать время.</b>\nИспользуйте формат: <code>1 день 2 часа 30 минут</code>",
             parse_mode="HTML"
         )
         return
@@ -218,7 +219,7 @@ async def unban_users(m: Message):
     else:
         if len(parts) < 2:
             await m.answer(
-                "❌ <b>Неверный формат команды!</b>\nИспользуйте: разбан {@username} или ответьте на сообщение",
+                "<b>Неверный формат команды!</b>\nИспользуйте: разбан {@username} или ответьте на сообщение",
                 parse_mode='HTML'
             )
             return
@@ -226,7 +227,7 @@ async def unban_users(m: Message):
         UserId = await resolve_id(m, mention)
 
     if not UserId:
-        await m.answer("❌ Пользователь не найден.")
+        await m.answer("Пользователь не найден.")
         return
 
     user_link = await user_link_global(UserId)
@@ -260,7 +261,7 @@ async def unban_users(m: Message):
                             admin_link = await user_link_global(ManagementAdminId)
 
                             await m.answer(
-                                f"😏 {admin_link}, вы пытаетесь разблокировать пользователя, которого забанил администратор высшего ранга ({admin_who_banned_link})!\n",
+                                f"{admin_link}, вы пытаетесь разблокировать пользователя, которого забанил администратор высшего ранга ({admin_who_banned_link})!\n",
                                 parse_mode='HTML',
                                 disable_web_page_preview=True
                             )
@@ -305,7 +306,7 @@ async def unban_users(m: Message):
             if ban_in_db:
                 await remove_ban_info(m.chat.id, UserId)
                 await m.answer(
-                    f"ℹ️ Пользователь {user_link} не найден в чате.\n"
+                    f"Пользователь {user_link} не найден в чате.\n"
                     f"👮‍♂️ Удал{g('ил', gender)}: {admin_link}",
                     parse_mode='HTML',
                     disable_web_page_preview=True
@@ -320,7 +321,7 @@ async def unban_users(m: Message):
         else:
             # Другая ошибка
             logger.error(e, exc_info=True)
-            await m.answer("❌ Ошибка при проверке статуса пользователя")
+            await m.answer("Ошибка при проверке статуса пользователя")
             return
 
     # Если пользователь забанен в Telegram, выполняем разбан
@@ -347,13 +348,13 @@ async def unban_users(m: Message):
         if ban_in_db:
             await remove_ban_info(m.chat.id, UserId)
             await m.answer(
-                f"⚠️ Не удалось разбанить {user_link}.\n"
+                f"<b>Не удалось разбанить {user_link}.</b>\n"
                 f"👮‍♂️ Попытал{g('лся', gender)} разбанить: {admin_link}",
                 parse_mode='HTML',
                 disable_web_page_preview=True
             )
         else:
-            await m.answer("❌ Ошибка при разбане")
+            await m.answer("Ошибка при разбане")
 
 
 @bans.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?банлист(\s|$)', re.IGNORECASE)))
@@ -378,7 +379,7 @@ async def ban_list(m: Message):
     total_pages = (total_bans + BANS_PER_PAGE - 1) // BANS_PER_PAGE
 
     if not bans_list:
-        await m.answer("📝 В этом чате нет забаненных пользователей.")
+        await m.answer("В этом чате нет забаненных пользователей.")
         return
 
     response = f"📋 <b>Список банов</b> (Страница {page + 1}/{max(1, total_pages)})\n\n"
@@ -459,7 +460,7 @@ async def ban_info(m: Message):
     else:
         if len(parts) < 2:
             await m.answer(
-                "❌ <b>Неверный формат команды!</b>\nИспользуйте: бан инфо {@username} или ответьте на сообщение",
+                "<b>Неверный формат команды!</b>\nИспользуйте: бан инфо {@username} или ответьте на сообщение",
                 parse_mode='HTML'
             )
             return
@@ -509,7 +510,7 @@ async def ban_info(m: Message):
                 time_left = time_end - current_time
 
                 if time_left.total_seconds() <= 0:
-                    time_text = "⏰ Бан истек"
+                    time_text = "Бан истек"
                     status = "🟢"
                 else:
                     actual_time_left = format_duration(time_left)
@@ -517,7 +518,7 @@ async def ban_info(m: Message):
                     status = "🔴"
             except Exception as e:
                 logger.error(f"Error parsing time: {e}")
-                time_text = "⚠️ Ошибка времени"
+                time_text = "Ошибка расчёта времени"
                 status = "⚠️"
 
     response = (
@@ -594,6 +595,7 @@ async def my_bans(m: Message):
 
 
 # === 2. /баны @user ===
+# === 2. /баны @user ===
 @bans.message(F.text.regexp(re.compile(r'^[!./]?баны\s+\S+', re.IGNORECASE)))
 async def user_bans(m: Message):
     if not await check_user_access(m.from_user.id, 1):
@@ -604,6 +606,13 @@ async def user_bans(m: Message):
         text = text[1:].strip()
 
     parts = text.split(maxsplit=2)
+
+    # Проверяем, не является ли это командой "баны фулл"
+    if len(parts) > 1 and parts[1].lower() == 'фулл':
+        # Если это "баны фулл", перенаправляем на соответствующую функцию
+        await user_bans_full(m)
+        return
+
     user_mention = parts[1] if len(parts) > 1 else ""
     page = 0
 
@@ -618,7 +627,7 @@ async def user_bans(m: Message):
         target_id = await resolve_id(m, user_mention)
 
     if not target_id:
-        await m.answer("❌ Пользователь не найден.")
+        await m.answer("Пользователь не найден.")
         return
 
     bans_list = await get_user_bans_all_chats(target_id, check_membership=True)
@@ -649,7 +658,8 @@ async def user_bans(m: Message):
         else:
             time_end = ban['time_end_dt']
             if time_end.tzinfo is None:
-                time_end = MOSCOW_TZ.localize(time_end) if hasattr(MOSCOW_TZ, 'localize') else time_end.replace(tzinfo=MOSCOW_TZ)
+                time_end = MOSCOW_TZ.localize(time_end) if hasattr(MOSCOW_TZ, 'localize') else time_end.replace(
+                    tzinfo=MOSCOW_TZ)
             elif time_end.tzinfo != MOSCOW_TZ:
                 time_end = time_end.astimezone(MOSCOW_TZ)
 
@@ -691,9 +701,10 @@ async def user_bans_full(m: Message):
 
     parts = text.split(maxsplit=3)
     if len(parts) < 3:
-        await m.answer("❌ Использование: /баны фулл @username")
+        await m.answer("Использование: /баны фулл @username")
         return
 
+    # Извлекаем username, пропуская "баны" и "фулл"
     user_mention = parts[2]
     page = 0
     if len(parts) > 3 and parts[3].isdigit():
@@ -705,7 +716,7 @@ async def user_bans_full(m: Message):
         target_id = await resolve_id(m, user_mention)
 
     if not target_id:
-        await m.answer("❌ Пользователь не найден.")
+        await m.answer("Пользователь не найден.")
         return
 
     bans_list = await get_user_bans_all_chats(target_id, check_membership=False)
@@ -745,7 +756,8 @@ async def user_bans_full(m: Message):
         else:
             time_end = ban['time_end_dt']
             if time_end.tzinfo is None:
-                time_end = MOSCOW_TZ.localize(time_end) if hasattr(MOSCOW_TZ, 'localize') else time_end.replace(tzinfo=MOSCOW_TZ)
+                time_end = MOSCOW_TZ.localize(time_end) if hasattr(MOSCOW_TZ, 'localize') else time_end.replace(
+                    tzinfo=MOSCOW_TZ)
             elif time_end.tzinfo != MOSCOW_TZ:
                 time_end = time_end.astimezone(MOSCOW_TZ)
 
@@ -897,8 +909,8 @@ async def user_bans_pag(c: CallbackQuery):
         )
         await c.answer()
     except Exception as e:
-        logger.exception("Ошибка пагинации /баны")
-        await c.answer("❌ Ошибка обновления списка.", show_alert=True)
+        logger.exception(f"Ошибка пагинации /баны: {e}", exc_info=True)
+        await c.answer("Ошибка обновления списка.", show_alert=True)
 
 
 # === Пагинация: баны фулл ===
@@ -980,7 +992,7 @@ async def full_bans_pag(c: CallbackQuery):
         await c.answer()
     except Exception as e:
         logger.exception("Ошибка пагинации /баны фулл")
-        await c.answer("❌ Ошибка обновления списка.", show_alert=True)
+        await c.answer("Ошибка обновления списка.", show_alert=True)
 
 
 
@@ -1026,7 +1038,7 @@ async def ban_users(m: Message):
     else:
         # Если не ответ на сообщение - анализируем команду
         if len(parts) < 2:
-            await m.reply('⚠️ Пользователь не указан!\n\n'
+            await m.reply('<b>⚠️ Пользователь не указан!</b>\n\n'
                           'Используйте один из способов:\n'
                           '1. Ответьте на сообщение пользователя\n'
                           '2. Укажите @username или ID пользователя\n'
@@ -1069,7 +1081,7 @@ async def ban_users(m: Message):
 
         # Если все еще не нашли пользователя
         if not UserId:
-            await m.reply('⚠️ Пользователь не указан или не найден!\n\n'
+            await m.reply('<b>⚠️ Пользователь не указан или не найден!</b>\n\n'
                           'Используйте один из способов:\n'
                           '1. Ответьте на сообщение пользователя\n'
                           '2. Укажите @username или ID пользователя\n'
@@ -1109,13 +1121,13 @@ async def ban_users(m: Message):
                         # Шутливые ответы в зависимости от ситуации
                         if UserRang == ManagementRang:
                             await m.answer(
-                                f"😂 {admin_link}, вы пытаетесь заблокировать администратора такого же ранга, как вы!\n",
+                                f"{admin_link}, вы пытаетесь заблокировать администратора такого же ранга, как вы!\n",
                                 parse_mode='HTML',
                                 disable_web_page_preview=True
                             )
                         else:
                             await m.answer(
-                                f"😏 {admin_link}, вы пытаетесь заблокировать администратора высшего ранга!\n",
+                                f"{admin_link}, вы пытаетесь заблокировать администратора высшего ранга!\n",
                                 parse_mode='HTML',
                                 disable_web_page_preview=True
                             )
@@ -1129,7 +1141,7 @@ async def ban_users(m: Message):
     admins = await bot.get_chat_administrators(chat_id)
 
     if not UserId:
-        await m.reply('⚠️ Пользователь не указан или указан не верно.\nПравильный вид команды: бан @')
+        await m.reply('Пользователь не указан или указан не верно.\nПравильный вид команды: бан @')
         return
 
     if UserId in [admin.user.id for admin in admins if admin.status == 'creator']:
@@ -1212,7 +1224,7 @@ async def ban_users(m: Message):
     # Если все еще не определили длительность
     if ban_duration is None:
         logger.error(f"Не удалось определить длительность для: '{time_str}'")
-        await m.answer(f"❌ Не удалось распознать время: {time_str}")
+        await m.answer(f"Не удалось распознать время: {time_str}")
         return
 
     user_link = await user_link_global(UserId)
@@ -1249,7 +1261,7 @@ async def ban_users(m: Message):
             disable_web_page_preview=True
         )
     else:
-        await m.answer(f"❌ Ошибка при бане: {result}",
+        await m.answer(f"Ошибка при бане: {result}",
                        parse_mode='HTML',
                        disable_web_page_preview=True
                        )
@@ -1279,7 +1291,7 @@ async def my_bans_pagination(c: CallbackQuery):
 
         # Проверяем, что запрос от того же пользователя
         if c.from_user.id != user_id:
-            await c.answer("❌ Это не ваши баны!", show_alert=True)
+            await c.answer("Это не ваши баны!", show_alert=True)
             return
 
         user_link = await user_link_global(user_id)
@@ -1305,7 +1317,7 @@ async def my_bans_pagination(c: CallbackQuery):
 
         # ТЕПЕРЬ ТЕКСТ КАК В КОМАНДЕ 'мои баны'
         response = f"📋 <b>Ваши баны во всех чатах</b>\n"
-        response += f"📊 Всего банов: {len(bans_list)}\n"
+        response += f"Всего банов: {len(bans_list)}\n"
 
         current_time = datetime.now(MOSCOW_TZ)
 
@@ -1349,7 +1361,7 @@ async def my_bans_pagination(c: CallbackQuery):
             chat_link = await chat_global_link(chat_id)
 
             response += (
-                f"{i}. «{chat_link}» {status}\n"
+                f"{i}. «{chat_link}»: {status}\n"
                 f"   📝 Срок: {duration_text} ({time_text})"
                 f"   💬 Причина: {reason}\n"
                 f"   ──────────────────────────\n"
@@ -1378,7 +1390,7 @@ async def my_bans_pagination(c: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in my_bans_pagination: {e}", exc_info=True)
-        await c.answer("❌ Ошибка при обновлении списка", show_alert=True)
+        await c.answer("Ошибка при обновлении списка", show_alert=True)
 
 
 @bans.callback_query(lambda c: c.data.startswith('userbans_'))
@@ -1438,7 +1450,7 @@ async def user_bans_pagination(c: CallbackQuery):
 
         # ТЕПЕРЬ ТЕКСТ КАК В КОМАНДЕ 'баны @'
         response = f"📋 <b>Все баны пользователя {user_link}</b>\n"
-        response += f"📊 Всего банов: {len(sorted_bans_list)} ({len(bans_in_chat)} в чатах где был, {len(bans_not_in_chat)} где не был)\n"
+        response += f"Всего банов: {len(sorted_bans_list)} ({len(bans_in_chat)} в чатах где был, {len(bans_not_in_chat)} где не был)\n"
 
         current_time = datetime.now(MOSCOW_TZ)
 
@@ -1493,15 +1505,16 @@ async def user_bans_pagination(c: CallbackQuery):
             # Иконка статуса участия в чате
             if was_in_chat:
                 chat_status = "✅"
-                # chat_status_text = "Был в чате"
+                chat_status_text = "Был в чате"
             else:
                 chat_status = "❌"
-                # chat_status_text = "Не был в чате"
+                chat_status_text = "Не был в чате"
 
             chat_link = await chat_global_link(chat_id)
 
             response += (
-                f"{i}. «{chat_link}» ({chat_status})\n"
+                f"{i}. «{chat_link}»\n"
+                f"    {chat_status} {chat_status_text}"
                 f"   📝 Срок: {duration_text} ({time_text})\n"
                 f"   👮‍♂️ Забанил: {admin_link}\n"
                 f"   💬 Причина: {reason}\n"
@@ -1532,7 +1545,7 @@ async def user_bans_pagination(c: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Error in user_bans_pagination: {e}", exc_info=True)
-        await c.answer("❌ Ошибка при обновлении списка", show_alert=True)
+        await c.answer("Ошибка при обновлении списка", show_alert=True)
 
 
 @bans.callback_query(lambda c: c.data.startswith('banlist_'))

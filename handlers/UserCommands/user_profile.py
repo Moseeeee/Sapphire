@@ -8,8 +8,8 @@ from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.SmsStatsDB import g
 from handlers.BotAutomaticWork.parse_time_auto import format_time_ago
 from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
-from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
-from handlers.BotAutomaticWork.users.checks.user_online_status import get_user_status
+from BotAutomaticWork.users.checks.check_UserId.check_users_id import resolve_id
+from BotAutomaticWork.users.checks.check_users_status_online.user_online_status import get_user_status
 from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_with_pseudonym
 from handlers.BotAutomaticWork.users.usersDB import get_user_first_seen, get_user_full_data
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender

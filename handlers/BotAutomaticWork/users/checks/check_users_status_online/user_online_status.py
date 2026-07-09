@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta
 import pytz
 
-from handlers.BotAutomaticWork.users.checks.check_online_statusDB import get_user_activity
+from BotAutomaticWork.users.checks.check_users_status_online.check_online_statusDB import get_user_activity
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +41,11 @@ async def get_user_status(user_id):
         time_diff = current_time - last_activity
 
         if time_diff <= timedelta(minutes=2):
-            return '(🔥 онлайн)'  # Онлайн
+            return '🔥'  # Онлайн
         elif time_diff <= timedelta(minutes=15):
-            return '(🥱 некоторое время неактивен)'  # Неактивен
+            return '🥱'  # Неактивен
         else:
-            return '(😴 оффлайн)'  # Оффлайн
+            return '😴'  # Оффлайн
 
     except (ValueError, TypeError) as e:
         logger.error(f"Ошибка при обработке времени для пользователя {user_id}: {e}")

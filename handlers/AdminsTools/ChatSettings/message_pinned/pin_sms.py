@@ -1,5 +1,7 @@
 import logging
+import math
 from datetime import datetime
+from glob import escape
 from typing import Tuple, List
 
 import pytz
@@ -67,11 +69,11 @@ async def pin_message_handler(message: Message):
                 except ValueError:
                     # Если первый аргумент не число - это время
                     time_str = " ".join(remaining_args)
-                    await message.reply("❌ Для закрепления по ID укажите ID сообщения\n"
+                    await message.reply("Для закрепления по ID укажите ID сообщения\n"
                                         "Пример: +пин 12345 5 минут")
                     return
             else:
-                await message.reply("❌ Ответьте на сообщение или укажите ID сообщения для закрепления")
+                await message.reply("Ответьте на сообщение или укажите ID сообщения для закрепления")
                 return
         else:
             # Если есть ответ на сообщение, берем его ID
@@ -99,24 +101,24 @@ async def pin_message_handler(message: Message):
             )
         except Exception as e:
             if "message to pin not found" in str(e).lower():
-                await message.reply("❌ Сообщение с таким ID не найдено в этом чате")
+                await message.reply("Сообщение с таким ID не найдено в этом чате")
                 return
             elif "not enough rights" in str(e).lower():
-                await message.reply("❌ У бота недостаточно прав для закрепления сообщений")
+                await message.reply("У бота недостаточно прав для закрепления сообщений")
                 return
             else:
                 logger.error(f"Ошибка при закреплении сообщения: {e}")
-                await message.reply("❌ Произошла ошибка при закреплении сообщения")
+                await message.reply("Произошла ошибка при закреплении сообщения")
                 return
 
         # Формируем текст для подтверждения
         pin_text = f'<a href="https://t.me/c/{str(chat_id)[4:]}/{message_id}">Сообщение</a>'
-        pin_type = "🔔 ГРОМКО" if is_loud else "🔇 ТИХО"
+        pin_type = "Все пользователи получат уведомление." if is_loud else ""
 
         # Если время не указано - простое закрепление
         if time_str is None:
             await message.reply(
-                f"📌 {pin_text} закреплено ({pin_type})",
+                f"📌 {pin_text} закреплено\n{pin_type}",
                 parse_mode='HTML',
                 disable_web_page_preview=True
             )
@@ -126,7 +128,7 @@ async def pin_message_handler(message: Message):
         pin_duration = parse_time_string(time_str)
         if not pin_duration:
             await message.reply(
-                "❌ Неверный формат времени.\n"
+                "<b>Неверный формат времени.</b>\n"
                 "Пример: 5 часов 30 минут"
             )
             return
@@ -141,14 +143,14 @@ async def pin_message_handler(message: Message):
         duration_text = format_duration(pin_duration)
         await message.reply(
             f"📌 {pin_text} закреплено ({pin_type}) на {duration_text}\n"
-            f"⏰ Будет откреплено: {unpin_time.strftime('%d.%m.%Y в %H:%M')}",
+            f"Будет откреплено: {unpin_time.strftime('%d.%m.%Y в %H:%M')}",
             parse_mode='HTML',
             disable_web_page_preview=True
         )
 
     except Exception as e:
         logger.error(f"Ошибка при закреплении сообщения: {e}", exc_info=True)
-        await message.reply("❌ Произошла ошибка при закреплении сообщения")
+        await message.reply("Произошла ошибка при закреплении сообщения")
 
 
 # Также обновим команду -пин для поддержки ID сообщений
@@ -176,14 +178,14 @@ async def unpin_message_handler(message: Message):
                     # Проверяем в нашей БД на всякий случай
                     pinned_in_db = await get_chat_pinned_messages(message.chat.id)
                     if not pinned_in_db:
-                        await message.reply("ℹ️ В этом чате нет закрепленных сообщений.")
+                        await message.reply("В этом чате нет закрепленных сообщений.")
                         return
             except Exception as e:
                 logger.warning(f"Не удалось проверить закрепки через getChat: {e}")
                 # Проверяем в БД
                 pinned_in_db = await get_chat_pinned_messages(message.chat.id)
                 if not pinned_in_db:
-                    await message.reply("ℹ️ В этом чате нет закрепленных сообщений.")
+                    await message.reply("В этом чате нет закрепленных сообщений.")
                     return
 
             # Сохраняем ID исходного сообщения
@@ -198,7 +200,7 @@ async def unpin_message_handler(message: Message):
                             callback_data=f"unpin_all_confirm_{message.chat.id}_{original_message_id}"
                         ),
                         InlineKeyboardButton(
-                            text="❌ Отмена",
+                            text="Отмена",
                             callback_data="unpin_all_cancel"
                         )
                     ]
@@ -231,17 +233,17 @@ async def unpin_message_handler(message: Message):
             try:
                 target_message_id = int(args[1])
             except ValueError:
-                await message.reply("❌ Укажите правильный ID сообщения\n"
+                await message.reply("<b>Укажите правильный ID сообщения.</b>\n"
                                     "Пример: -пин 12345")
                 return
 
         if not target_message_id:
             # Если нет аргументов и не ответ на сообщение - показываем справку
             await message.reply(
-                "ℹ️ Использование команды:\n"
-                "• Ответьте на сообщение с `-пин` чтобы открепить его\n"
-                "• Используйте `-пин [ID]` чтобы открепить сообщение по ID\n"
-                "• Используйте `-пин все` чтобы открепить все сообщения\n\n"
+                "ℹ️ <b>Использование команды:</b>\n"
+                "Ответьте на сообщение с `-пин` чтобы открепить его\n"
+                "Используйте `-пин [ID]` чтобы открепить сообщение по ID\n"
+                "Используйте `-пин все` чтобы открепить все сообщения\n\n"
                 "Пример: `-пин 12345`"
             )
             return
@@ -254,12 +256,12 @@ async def unpin_message_handler(message: Message):
                     message_id=target_message_id
                 )
                 await remove_pinned_message(message.chat.id, target_message_id)
-                await message.reply("📌 Сообщение откреплено")
+                await message.reply("Сообщение откреплено")
             except Exception as e:
                 logger.error(f"Ошибка при откреплении: {e}")
                 # Возможно, сообщение уже не закреплено, но есть в БД
                 await remove_pinned_message(message.chat.id, target_message_id)
-                await message.reply("⚠️ Сообщение не было закреплено, но удалено из базы данных")
+                await message.reply("Сообщение не было закреплено, но удалено из базы данных")
         else:
             # Проверяем, закреплено ли сообщение вообще
             try:
@@ -272,128 +274,131 @@ async def unpin_message_handler(message: Message):
                     )
 
                     unpin_text = f'<a href="https://t.me/c/{str(message.chat.id)[4:]}/{target_message_id}">Сообщение</a>'
-                    await message.reply(f"📌 {unpin_text} откреплено")
+                    await message.reply(f"{unpin_text} откреплено")
                 else:
-                    await message.reply("❌ Это сообщение не закреплено или не найдено")
+                    await message.reply("Это сообщение не закреплено или не найдено")
             except Exception as e:
                 logger.error(f"Ошибка при проверке закрепки: {e}")
-                await message.reply("❌ Это сообщение не закреплено или не найдено")
+                await message.reply("Это сообщение не закреплено или не найдено")
 
     except Exception as e:
         logger.error(f"Ошибка при откреплении сообщения: {e}", exc_info=True)
-        await message.reply("❌ Произошла ошибка при откреплении сообщения")
+        await message.reply("Произошла ошибка при откреплении сообщения")
 
 
-@pin_sms.message(F.text & F.text.casefold().startswith("!пины"))
+ITEMS_PER_PAGE = 5
+
+
+async def create_pins_page(chat_id: int, page: int = 1) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Генерирует HTML-текст страницы в новом стиле и клавиатуру пагинации"""
+    pool = get_db_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT message_id, unpin_time 
+            FROM pinned_messages 
+            WHERE chat_id = $1 
+            ORDER BY unpin_time NULLS LAST, message_id DESC
+        ''', chat_id)
+
+    if not rows:
+        return "🔹 <b>Информация о закрепленных сообщениях</b>\nВ базе данных нет записей", None
+
+    current_time = datetime.now(MOSCOW_TZ)
+
+    # Списки для подсчета общей статистики
+    scheduled, permanent, expired = [], [], []
+
+    # Сюда собираем готовые отформатированные текстовые блоки
+    all_items = []
+
+    for row in rows:
+        msg_id, unpin_time = row['message_id'], row['unpin_time']
+        link = f"https://t.me/c/{str(chat_id)[4:]}/{msg_id}"
+
+        if unpin_time:
+            date_str = unpin_time.strftime('%d.%m.%Y %H:%M')
+            if unpin_time < current_time:
+                expired.append(row)
+                all_items.append(
+                    f"🔴 <b>{date_str}</b>\n"
+                    f"🔗 <a href=\"{link}\">Ссылка на сообщение</a>\n"
+                    f"⏳ Осталось: <b>Просрочено</b>"
+                )
+            else:
+                time_left = format_duration(unpin_time - current_time)
+                scheduled.append(row)
+                all_items.append(
+                    f"🟡 <b>{date_str}</b>\n"
+                    f"🔗<a href=\"{link}\">Ссылка на сообщение</a>\n"
+                    f"⏳ Осталось: <b>{escape(time_left)}</b>"
+                )
+        else:
+            permanent.append(row)
+            all_items.append(
+                f"🟢 <b>Бессрочно</b>\n"
+                f"🔗 <a href=\"{link}\">Ссылка на сообщение</a>"
+            )
+
+    total_items = len(all_items)
+    total_pages = math.ceil(total_items / ITEMS_PER_PAGE)
+
+    # Корректировка страницы (защитный буфер)
+    page = max(1, min(page, total_pages))
+    start_idx = (page - 1) * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+
+    # Формируем каркас сообщения
+    response_parts = [
+        "🔹 <b>Информация о закрепленных сообщениях</b>\n"
+    ]
+
+    # Добавляем блоки текущей страницы, разделяя их пустой строкой
+    page_items = all_items[start_idx:end_idx]
+    response_parts.append("\n\n".join(page_items))
+
+
+    # Статистика
+    response_parts.append(f"\n\n<b>Статистика:</b>")
+    response_parts.append(f"Всего записей: {total_items}")
+    if scheduled: response_parts.append(f"Ожидают открепления: {len(scheduled)}")
+    if permanent: response_parts.append(f"Бессрочных: {len(permanent)}")
+    if expired:   response_parts.append(f"Просроченных: {len(expired)}")
+
+
+    # Сборка инлайн-кнопок пагинации
+    kb = None
+    if total_pages > 1:
+        buttons = []
+        if page > 1:
+            buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"pins_page:{page - 1}"))
+        if page < total_pages:
+            buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"pins_page:{page + 1}"))
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[buttons])
+
+    return "\n".join(response_parts), kb
+
+
+@pin_sms.message(F.text.casefold().startswith(("!пины",
+                                               ".пины",
+                                               "/пины",
+                                               "пины")))
 async def show_pinned_info(message: Message):
     """Показывает информацию о закрепленных сообщениях"""
-
     if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 63):
         return
 
     try:
-        chat_id = message.chat.id
-
-        # Получаем все записи о закреплениях для этого чата
-        pool = get_db_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch('''
-                SELECT message_id, unpin_time 
-                FROM pinned_messages 
-                WHERE chat_id = $1 
-                ORDER BY unpin_time NULLS LAST
-            ''', chat_id)
-
-        current_time = datetime.now(MOSCOW_TZ)
-
-        # Формируем красивое сообщение
-        response_parts = ["🔹 *Информация о закрепленных сообщениях*\n"]
-
-        if not rows:
-            response_parts.append("📭 *В базе данных нет записей*")
-        else:
-            # Разделяем сообщения на категории
-            scheduled = []
-            permanent = []
-            expired = []
-
-            for row in rows:
-                message_id = row['message_id']
-                unpin_time = row['unpin_time']
-                link = f"https://t.me/c/{str(chat_id)[4:]}/{message_id}"
-
-                if unpin_time:
-                    time_left = unpin_time - current_time
-                    if time_left.total_seconds() < 0:
-                        expired.append((message_id, link, unpin_time))
-                    else:
-                        time_text = format_duration(time_left)
-                        scheduled.append((message_id, link, unpin_time, time_text))
-                else:
-                    permanent.append((message_id, link))
-
-            # Форматируем каждую категорию
-
-            # Просроченные
-            if expired:
-                response_parts.append(f"\n🔴 *Просроченные ({len(expired)})*")
-                for msg_id, link, unpin_time in expired:
-                    response_parts.append(
-                        f"   └ [{msg_id}]({link}) — "
-                        f"*{unpin_time.strftime('%d.%m.%Y %H:%M')}*"
-                    )
-
-            # С автооткреплением
-            if scheduled:
-                response_parts.append(f"\n🟡 *С автооткреплением ({len(scheduled)})*")
-                for msg_id, link, unpin_time, time_left in scheduled:
-                    response_parts.append(
-                        f"   └ [{msg_id}]({link}) — "
-                        f"*{unpin_time.strftime('%d.%m.%Y %H:%M')}*\n"
-                        f"      ⏳ *Осталось:* {time_left}"
-                    )
-
-            # Бессрочные
-            if permanent:
-                response_parts.append(f"\n🟢 *Бессрочные ({len(permanent)})*")
-                for msg_id, link in permanent:
-                    response_parts.append(f"   └ [{msg_id}]({link})")
-
-            # Общая статистика
-            response_parts.append(f"\n📊 *Статистика:*")
-            total = len(rows)
-            if total:
-                response_parts.append(f"   ├ Всего записей: {total}")
-                if expired:
-                    response_parts.append(f"   ├ Просрочено: {len(expired)}")
-                if scheduled:
-                    response_parts.append(f"   ├ Ожидают открепления: {len(scheduled)}")
-                if permanent:
-                    response_parts.append(f"   └ Бессрочные: {len(permanent)}")
-
-        # Информация о текущем закрепленном сообщении
-        #try:
-            #chat_info = await bot.get_chat(chat_id)
-            #if chat_info.pinned_message:
-                #current_pin_id = chat_info.pinned_message.message_id
-               # pin_link = f"https://t.me/c/{str(chat_id)[4:]}/{current_pin_id}"
-                #response_parts.append(f"\n📍 *Текущее закрепленное:*")
-                #response_parts.append(f"   └ [{current_pin_id}]({pin_link})")
-            #else:
-                #response_parts.append(f"\n📍 *Текущее закрепленное:*")
-                #response_parts.append(f"   └ Нет закрепленных сообщений")
-        #except Exception as e:
-            #logger.warning(f"Не удалось получить информацию о текущем пине: {e}")
-            #response_parts.append(f"\n📍 *Текущее закрепленное:*")
-            #response_parts.append(f"   └ Не удалось получить данные")
-
-        # Собираем финальное сообщение
-        response = "\n".join(response_parts)
-        await message.reply(response, parse_mode='Markdown', disable_web_page_preview=True)
-
+        text, reply_markup = await create_pins_page(message.chat.id, page=1)
+        await message.reply(
+            text,
+            parse_mode='HTML',
+            disable_web_page_preview=True,
+            reply_markup=reply_markup
+        )
     except Exception as e:
         logger.error(f"Ошибка при получении информации о пинах: {e}", exc_info=True)
-        await message.reply("❌ *Произошла ошибка при получении информации*", parse_mode='Markdown')
+        await message.reply("Произошла ошибка при обработке данных", parse_mode='HTML')
 
 
 
@@ -423,7 +428,7 @@ async def handle_unpin_all_confirm(callback: CallbackQuery):
                         callback_data=f"unpin_all_execute_{chat_id}_{original_msg_id}"
                     ),
                     InlineKeyboardButton(
-                        text="❌ Отмена",
+                        text="Отмена",
                         callback_data="unpin_all_cancel"
                     )
                 ]
@@ -441,7 +446,7 @@ async def handle_unpin_all_confirm(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Ошибка при подтверждении открепления: {e}")
-        await callback.answer("❌ Ошибка при подтверждении", show_alert=True)
+        await callback.answer("Ошибка при подтверждении", show_alert=True)
 
 
 @pin_sms.callback_query(F.data.startswith("unpin_all_execute_"))
@@ -481,7 +486,7 @@ async def handle_unpin_all_execute(callback: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Ошибка при выполнении открепления: {e}")
-        await callback.message.edit_text("❌ Ошибка при откреплении сообщений")
+        await callback.message.edit_text("Ошибка при откреплении сообщений")
         await callback.answer("Ошибка", show_alert=True)
 
 
@@ -498,13 +503,13 @@ async def handle_unpin_all_cancel(callback: CallbackQuery):
     """Обработчик отмены открепления всех сообщений"""
     try:
         # Изменяем сообщение, показывая отмену
-        await callback.message.edit_text("❌ Открепление отменено.")
+        await callback.message.edit_text("Открепление отменено.")
 
         await callback.answer("Действие отменено")
 
     except Exception as e:
         logger.error(f"Ошибка при отмене открепления: {e}")
-        await callback.answer("❌ Ошибка", show_alert=True)
+        await callback.answer("Ошибка", show_alert=True)
 
 
 async def get_chat_pinned_messages(chat_id: int) -> List[Tuple[int, int]]:
@@ -569,3 +574,26 @@ async def cleanup_expired_pins():
         except Exception as e:
             logger.error(f"Ошибка в автоочистке закрепок: {e}", exc_info=True)
             await asyncio.sleep(300)  # Ждём 5 минут при ошибке
+
+
+@pin_sms.callback_query(F.data.startswith("pins_page:"))
+async def process_pins_pagination(callback: CallbackQuery):
+    """Обработка переключения страниц кнопками"""
+    if not await auto_check_AccessLevel_for_rang(callback.from_user.id, callback.message.chat.id, 63):
+        await callback.answer("Недостаточно прав для переключения страниц.", show_alert=True)
+        return
+
+    try:
+        page = int(callback.data.split(":")[1])
+        text, reply_markup = await create_pins_page(callback.message.chat.id, page=page)
+
+        await callback.message.edit_text(
+            text,
+            parse_mode='HTML',
+            disable_web_page_preview=True,
+            reply_markup=reply_markup
+        )
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Ошибка пагинации пинов: {e}", exc_info=True)
+        await callback.answer("Ошибка при смене страницы.", show_alert=True)

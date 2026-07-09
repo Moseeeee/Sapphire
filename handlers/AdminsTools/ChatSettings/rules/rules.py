@@ -23,91 +23,60 @@ rul = Router()
 
 logger = logging.getLogger(__name__)
 
-@rul.message(lambda m: m.text and m.text.lower().startswith("+правила"))
+
+
+@rul.message(F.text.startswith("+правила"))
 async def new_rules_text(msg: Message):
     try:
-
         chat_id = msg.chat.id
         user_id = msg.from_user.id
 
         if not await auto_check_AccessLevel_for_rang(user_id, chat_id, 47):
             return
 
-
-        # Проверки
         if msg.chat.type == 'private':
             return
 
-
-        if len(msg.html_text.split("\n", 1)) < 2:
-            await msg.reply('⚠️ Укажите текст правил после команды, начиная с новой строки.')
+        parts = msg.html_text.split("\n", 1)
+        if len(parts) < 2:
+            await msg.reply('Укажите текст правил после команды, начиная с новой строки.')
             return
 
-
-
-
-        # Извлекаем текст правил
-        rules_text = msg.html_text.split("\n", 1)[1].strip()
-
+        rules_text = parts[1].strip()
         if not rules_text:
-            await msg.reply('⚠️ Текст правил не может быть пустым.')
+            await msg.reply('Текст правил не может быть пустым.')
             return
 
         chat_link = await chat_global_link(chat_id)
         user_link = await user_link_global(user_id)
 
-        check_links_text = contains_links(rules_text)
+        if contains_links(rules_text):
+            # Отправляем на модерацию
+            admin_message = await msg.bot.send_message(
+                AGENT_CHAT_ID_CheckTextApprovals,
+                f"📋 <b>Новые правила на проверку</b>\n\n"
+                f"💬 <b>Текст:</b>\n{rules_text}\n\n"
+                f"ℹ️ Некая информация:\n"
+                f"<b>Чат:</b> {chat_link}\n"
+                f"<b>Пользователь:</b> {user_link}",
+                reply_markup=get_moderation_keyboard(chat_id, user_id, "rule"),  # 👈 "rule", не "rules"
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+            await msg.reply('⚠️ Текст отправлен на проверку, ожидайте.')
 
+            existing = await get_pending_moderation(chat_id, 'rule')
+            if existing:
+                try:
+                    await msg.bot.delete_message(AGENT_CHAT_ID_CheckTextApprovals, existing['admin_message_id'])
+                except Exception:
+                    pass
 
-        # Если есть ссылки - отправляем на модерацию
-        if check_links_text:
-            try:
-                admin_message = await msg.bot.send_message(
-                    AGENT_CHAT_ID_CheckTextApprovals,
-                    f"📋 <b>Новые правила на проверку</b>\n\n"
-                    f"💬 <b>Текст:</b>\n{rules_text}\n\n"
-                    f"ℹ️ Некая информация:\n"
-                    f"<b>Чат:</b> {chat_link}\n"
-                    f"<b>Пользователь:</b> {user_link}",
-                    reply_markup=get_moderation_keyboard(chat_id, user_id, "rules"),
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
-                )
-
-                await msg.reply('⚠️ Текст отправлен на проверку, ожидайте.')
-
-                # Общая логика для обновления/создания записи модерации
-                existing = await get_pending_moderation(chat_id, 'rules')
-
-                if existing:
-                    try:
-                        await msg.bot.delete_message(AGENT_CHAT_ID_CheckTextApprovals, existing['admin_message_id'])
-                    except Exception:
-                        pass  # Игнорируем ошибки удаления старого сообщения
-
-                # Создаем или обновляем запись
-                await add_pending_moderation(
-                    chat_id,
-                    'rules',
-                    rules_text,
-                    msg.message_id,
-                    admin_message.message_id,
-                    user_id
-                )
-
-            except Exception as e:
-                await msg.reply('❌ Ошибка при отправке на модерацию.')
-                logger.error(e, exc_info=True)
-                return
-
+            await add_pending_moderation(chat_id, 'rule', rules_text, msg.message_id, admin_message.message_id, user_id)
         else:
-            # Если ссылок нет - сразу сохраняем
-            try:
-                await set_rules(chat_id, rules_text)
-                await msg.reply('✅ Правила установлены')
-            except Exception as e:
-                await msg.reply('❌ Ошибка при сохранении правил.')
-                logger.error(e, exc_info=True)
+            # Сохраняем сразу
+            await set_rules(chat_id, rules_text)
+            await msg.reply('✅ Правила установлены')
 
     except Exception as e:
         await msg.reply('❌ Произошла ошибка при обработке команды.')
@@ -133,7 +102,7 @@ async def del_rules_text(msg: Message):
             await delete_rules_text(chat_id)
             await msg.reply('✅ Правила чата удалены')
         else:
-            await msg.reply('🤓 Правил чата и не было')
+            await msg.reply('В чате не установлены правила')
             return
     except Exception as e:
         await msg.reply(f'<b>Произошла ошибка:</b>\n\n{e}', parse_mode='HTML')
@@ -158,7 +127,7 @@ async def rules_text(msg: Message):
         rules_text = await check_rules_text(chat_id)
 
         if not rules_text:
-            await bot.send_message(chat_id=chat_id, text='❌ Правила чата не установлены')
+            await bot.send_message(chat_id=chat_id, text='Правила чата не установлены')
             return
 
         rules_message = f'{rules_text}'
@@ -182,7 +151,7 @@ async def rules_text(msg: Message):
             )
 
     except Exception as e:
-        await msg.reply(f'<b>Произошла ошибка:</b>\n\n{e}', parse_mode='HTML', disable_web_page_preview=True)
+        await msg.reply(f'⚠️ <b>Произошла ошибка:</b>\n\n{e}', parse_mode='HTML', disable_web_page_preview=True)
         logger.error(e, exc_info=True)
 
 

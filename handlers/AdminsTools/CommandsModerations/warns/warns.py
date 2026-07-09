@@ -29,7 +29,7 @@ from handlers.BotAutomaticWork.parse_time_auto import format_duration, parse_tim
 from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import get_random_text, rate_limit_with_cleanup
-from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
+from BotAutomaticWork.users.checks.check_UserId.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 from handlers.BotAutomaticWork.universal_bot import bot
@@ -164,13 +164,13 @@ async def enforce_warn_limits(chat_id: int):
         for i, violator in enumerate(violators, 1):
             message_lines.append(
                 f"{i}. {violator['user_link']} - "
-                f"{violator['warn_count']} варнов > лимит {warn_limit}\n"
+                f"{violator['warn_count']} > {warn_limit}\n"
                 f"   Действие: {violator['action_result']}"
             )
 
         # Добавляем статистику
         unique_actions = set(action_messages)
-        stats_line = f"\n📊 <b>Статистика:</b> наказано {len(violators)} пользователей"
+        stats_line = f"\n<b>Статистика:</b> наказано {len(violators)} пользователей"
         if len(unique_actions) == 1:
             stats_line += f" ({action_messages[0]})"
         else:
@@ -228,7 +228,7 @@ async def warn_list(m: Message):
     total_pages = (total_warns + WARNS_PER_PAGE - 1) // WARNS_PER_PAGE
 
     if not warns_list:
-        await m.answer("📝 В этом чате нет пользователей с варнами.")
+        await m.answer("В этом чате нет пользователей с варнами.")
         return
 
     response = f"📋 <b>Список варнов</b> (Страница {page + 1}/{max(1, total_pages)})\n\n"
@@ -277,7 +277,7 @@ async def set_warn_outcome(m: Message):
     # Проверяем, указано ли действие
     if len(parts) < 3:
         await m.answer(
-            "❌ Укажите исход при достижении лимита варнов.\n"
+            "<b>Укажите исход при достижении лимита варнов.</b>\n"
             "Доступные варианты: <code>бан</code>, <code>мут</code>, <code>кик</code>\n"
             "Пример: <code>варны исход бан</code>",
             parse_mode="HTML"
@@ -287,7 +287,7 @@ async def set_warn_outcome(m: Message):
     action = parts[2].lower().strip()
     if action not in ['бан', 'мут', 'кик']:
         await m.answer(
-            "❌ Неверный исход. Используйте: <code>бан</code>, <code>мут</code> или <code>кик</code>",
+            "Неверный исход. Используйте: <code>бан</code>, <code>мут</code> или <code>кик</code>",
             parse_mode="HTML"
         )
         return
@@ -332,7 +332,7 @@ async def set_default_warn_period(m: Message):
     # Проверяем, указано ли время
     if len(parts) < 3:
         await m.answer(
-            "❌ Укажите длительность варна по умолчанию.\n"
+            "<b>Укажите длительность варна по умолчанию.</b>\n"
             "Пример: <code>варны период 3 дня</code>\n"
             "Или: <code>варны период 1 неделя</code>",
             parse_mode="HTML"
@@ -344,7 +344,7 @@ async def set_default_warn_period(m: Message):
 
     if parsed_duration is None:
         await m.answer(
-            "❌ Не удалось распознать время. Используйте формат: <code>1 день 2 часа 30 минут</code>",
+            "Не удалось распознать время. Используйте формат: <code>1 день 2 часа 30 минут</code>",
             parse_mode="HTML"
         )
         return
@@ -369,7 +369,7 @@ async def set_warn_limit_cmd(m: Message):
     # Проверяем, указано ли число
     if len(parts) < 3:
         await m.answer(
-            "❌ Укажите лимит варнов (от 1 до 100).\n"
+            "Укажите лимит варнов (от 1 до 100).\n"
             "Пример: <code>варн лимит 5</code>",
             parse_mode="HTML"
         )
@@ -378,7 +378,7 @@ async def set_warn_limit_cmd(m: Message):
     try:
         limit = int(parts[2])
         if limit < 1 or limit > 100:
-            await m.answer("❌ Лимит варнов должен быть от 1 до 100.")
+            await m.answer("Лимит варнов должен быть от 1 до 100.")
             return
 
         old_limit = await get_warn_limit(m.chat.id)
@@ -399,10 +399,10 @@ async def set_warn_limit_cmd(m: Message):
                 await enforce_warn_limits(m.chat.id)
             except Exception as e:
                 logger.error(f"Ошибка при enforce_warn_limits: {e}", exc_info=True)
-                await m.answer("⚠️ Ошибка при автоматической проверке варнов.")
+                await m.answer("Ошибка при автоматической проверке варнов.")
 
     except ValueError:
-        await m.answer("❌ Укажите корректное число для лимита.")
+        await m.answer("Укажите корректное число для лимита.")
 
 
 @warn.message(F.text.regexp(re.compile(r'^[-]варн', re.IGNORECASE)))
@@ -427,7 +427,7 @@ async def unwarn_user(m: Message):
     else:
         if len(parts) < 2:
             await m.answer(
-                "❌ Неверный формат!\nИспользуйте: <code>-варн {@username} [номер_варна (не обязательно)] </code> или ответьте на сообщение",
+                "<b>Неверный формат!</b>\nИспользуйте: <code>-варн {@username} [номер_варна (не обязательно)] </code> или ответьте на сообщение",
                 parse_mode="HTML"
             )
             return
@@ -443,11 +443,11 @@ async def unwarn_user(m: Message):
     current_warns = await get_user_warns_count(m.chat.id, UserId)
 
     if current_warns == 0:
-        await m.answer(f"❌ У пользователя {user_link} нет активных варнов.")
+        await m.answer(f"У пользователя {user_link} нет активных варнов.")
         return
 
     if warn_id and (warn_id < 1 or warn_id > current_warns):
-        await m.answer(f"❌ Неверный номер варна. У пользователя {user_link} всего {current_warns} варн(ов).")
+        await m.answer(f"Неверный номер варна. У пользователя {user_link} всего {current_warns} варн(ов).")
         return
 
     # Снимаем варн
@@ -465,7 +465,7 @@ async def unwarn_user(m: Message):
                        parse_mode='HTML', disable_web_page_preview=True)
 
 
-@warn.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?варны\s+\S+', re.IGNORECASE)))
+@warn.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?варны(?:\s+\S+)?', re.IGNORECASE)))
 async def user_warns(m: Message):
 
     if not await auto_check_AccessLevel_for_rang(m.from_user.id, m.chat.id, 60):
@@ -496,17 +496,21 @@ async def user_warns(m: Message):
             page = max(0, int(parts[1]) - 1)
     else:
         if len(parts) < 2:
-            await m.answer(
-                "❌ Неверный формат!\nИспользуйте: <code>варны {@username} [страница]</code> или ответьте на сообщение",
-                parse_mode="HTML"
-            )
-            return
-
-        mention = parts[1]
-        UserId = await resolve_id(m, mention)
-        page = 0
-        if len(parts) > 2 and parts[2].isdigit():
-            page = max(0, int(parts[2]) - 1)
+            # Ни ответа, ни указания пользователя — показываем варны того, кто вызвал команду
+            UserId = m.from_user.id
+            page = 0
+        else:
+            # Если передан один аргумент и это число (например, "варны 2" без реплая),
+            # воспринимаем это как запрос страницы для самого себя.
+            if len(parts) == 2 and parts[1].isdigit() and int(parts[1]) < 1000:
+                UserId = m.from_user.id
+                page = max(0, int(parts[1]) - 1)
+            else:
+                mention = parts[1]
+                UserId = await resolve_id(m, mention)
+                page = 0
+                if len(parts) > 2 and parts[2].isdigit():
+                    page = max(0, int(parts[2]) - 1)
 
     user_link = await user_link_global(UserId)
     warn_count = await get_user_warns_count(m.chat.id, UserId)
@@ -637,7 +641,7 @@ async def warn_user(m: Message):
     else:
         # Если не ответ на сообщение - анализируем команду
         if len(parts) < 2:
-            await m.reply('⚠️ Пользователь не указан!\n\n'
+            await m.reply('<b>Пользователь не указан!</b>\n\n'
                           'Используйте один из способов:\n'
                           '1. Ответьте на сообщение пользователя\n'
                           '2. Укажите @username или ID пользователя\n'
@@ -707,7 +711,7 @@ async def warn_user(m: Message):
 
         # Если все еще не нашли пользователя
         if not UserId:
-            await m.reply('⚠️ Пользователь не указан или не найден!\n\n'
+            await m.reply('<b>Пользователь не указан или не найден!</b>\n\n'
                           'Используйте один из способов:\n'
                           '1. Ответьте на сообщение пользователя\n'
                           '2. Укажите @username или ID пользователя\n'
@@ -810,10 +814,10 @@ async def warn_user(m: Message):
     try:
         member = await bot.get_chat_member(chat_id, UserId)
         if member.status == 'kicked':
-            await m.answer("❌ Нельзя выдать варн забаненному пользователю!")
+            await m.answer("Нельзя выдать варн забаненному пользователю!")
             return
         if member.status == 'left':
-            await m.answer("❌ Нельзя выдать варн пользователю, которого нет в чате!")
+            await m.answer("Нельзя выдать варн пользователю, которого нет в чате!")
             return
     except Exception as e:
         logger.error(f"Ошибка при проверке статуса пользователя: {e}")
@@ -876,7 +880,7 @@ async def warn_user(m: Message):
 
         await m.answer(response, parse_mode='HTML', disable_web_page_preview=True)
     else:
-        await m.answer("❌ Ошибка при выдаче варна")
+        await m.answer("Ошибка при выдаче варна")
 
 
 @warn.callback_query(lambda c: c.data.startswith('warnlist_'))
@@ -935,7 +939,7 @@ async def user_warns_pagination(c: CallbackQuery):
 
         parts = c.data.split('_')
         if len(parts) != 4:
-            await c.answer("❌ Ошибка данных", show_alert=True)
+            await c.answer("Ошибка данных", show_alert=True)
             return
 
         UserId = int(parts[2])
@@ -1022,7 +1026,7 @@ async def user_warns_pagination(c: CallbackQuery):
 
     except Exception as e:
         logger.error(f"Ошибка в пагинации варнов пользователя: {e}", exc_info=True)
-        await c.answer("❌ Произошла ошибка", show_alert=True)
+        await c.answer("Произошла ошибка", show_alert=True)
 
 
 @warn.message(F.text.regexp(r'^[!/.](?:кнопочка)'))

@@ -51,7 +51,7 @@ def format_duration(delta: timedelta) -> str:
     if total_seconds < 60:
         return "меньше минуты"
 
-    # ПОСЛЕДОВАТЕЛЬНОЕ вычисление остатков — исправление бага
+    # ПОСЛЕДОВАТЕЛЬНОЕ вычисление остатков
     remaining = total_seconds
     years = remaining // (365 * 24 * 3600)
     remaining %= (365 * 24 * 3600)
@@ -62,6 +62,7 @@ def format_duration(delta: timedelta) -> str:
     days = remaining // (24 * 3600)
     remaining %= (24 * 3600)
     hours = remaining // 3600
+    remaining %= 3600  # <--- ДОБАВЛЕН ИСПРАВЛЕННЫЙ ОСТАТОК
     minutes = remaining // 60
 
     # Формируем части для вывода
@@ -87,7 +88,6 @@ def format_duration(delta: timedelta) -> str:
         result_parts.append(f"{parts[1][0]} {parts[1][1]}")
 
     return " ".join(result_parts) if result_parts else "меньше минуты"
-
 
 def parse_time_string(time_str: str) -> Optional[timedelta]:
     """Парсит строку времени и возвращает timedelta. Совместима со старым кодом."""

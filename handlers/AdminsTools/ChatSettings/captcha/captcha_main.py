@@ -9,16 +9,17 @@ from aiogram.types import (
     InlineKeyboardButton, InlineKeyboardMarkup, ChatMemberUpdated
 )
 
-from handlers.sanor_commands.payment.payment import check_user_access
+
 from handlers.AdminsTools.ChatSettings.captcha.captchaDB import *
 from handlers.AdminsTools.CommandsModerations.bans.ban import perform_ban
 from handlers.AdminsTools.ChatSettings.captcha.captcha_generator import CaptchaGenerator
 from handlers.AdminsTools.CommandsModerations.mute.mute import get_chat_permissions
 from handlers.BotAutomaticWork.parse_time_auto import format_duration, parse_time_string
 from handlers.BotAutomaticWork.users.GenderUtils import g
-from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
+from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang, \
+    check_user_access
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import get_random_text, rate_limit_with_cleanup
-from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
+from BotAutomaticWork.users.checks.check_UserId.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
@@ -121,7 +122,7 @@ async def handle_new_member(event: ChatMemberUpdated, bot: Bot):
         user_link = await user_link_global(user.id)
         msg = await bot.send_message(
             chat_id=chat_id,
-            text=f"⚠️ <b>{user_link},{tag_link}сложность капчи в чате повышена. Требуется пройти капчу заново.</b>\nНажмите на кнопку ниже, чтобы пройти капчи 👇🏻",
+            text=f"⚠️ <b>{user_link},{tag_link}сложность капчи в чате повышена. Требуется пройти капчу заново.</b>\nНажмите на кнопку ниже, чтобы пройти капчи",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔐 Перейти к прохождению капче", url=deep_link)]
             ]),
@@ -163,25 +164,25 @@ async def delete_message_after_delay(bot: Bot, chat_id: int, message_id: int, de
 
 async def analyze_captcha_behavior(chat_id: int, user_id: int, total: int, success_count: int, success_rate: float) -> str:
     if total == 0:
-        return "🔒 Никогда не проходил капчу"
+        return "Никогда не проходил капчу"
 
     history = await get_user_captcha_history(chat_id, user_id, limit=20, offset=0)
     successes = [h for h in history if h[2]]
     sorted_history = sorted(history, key=lambda x: x[4])
 
     if total >= 10 and success_rate < 10:
-        return "🔥 Автогенератор (спам-бот)"
+        return "Автогенератор (спам-бот)"
     if total >= 5 and success_rate < 20:
         fast_auto = any(s[3] <= 1.5 and s[1] in ('средняя', 'тяжелая') for s in successes)
         if not fast_auto:
-            return "🤖 ЮзерБот (автоматизация)"
+            return "ЮзерБот (автоматизация)"
     if any(s[3] <= 1.5 and s[1] in ('средняя', 'тяжелая') for s in successes):
-        return "⚡ Автокликер / решатель"
+        return "Автокликер / решатель"
     if total >= 4 and success_rate == 100.0:
         if all(s[3] <= 3 and s[1] in ('средняя', 'тяжелая') for s in successes):
-            return "🕵️‍♂️ Скрытый бот? (идеальные результаты)"
+            return "Скрытый бот? (идеальные результаты)"
     if any(s[3] >= 240 for s in successes):
-        return "⏳ Затяжное прохождение (4+ минуты)"
+        return "Затяжное прохождение (4+ минуты)"
     rapid_fails = 0
     for i in range(1, len(sorted_history)):
         prev, curr = sorted_history[i - 1], sorted_history[i]
@@ -189,14 +190,14 @@ async def analyze_captcha_behavior(chat_id: int, user_id: int, total: int, succe
         if not prev[2] and not curr[2] and delta < 5.0:
             rapid_fails += 1
     if rapid_fails >= 2:
-        return "🔄 Много быстрых неудачных попыток"
+        return "Много быстрых неудачных попыток"
     if total >= 3 and 20 <= success_rate < 50:
-        return "📉 Испытывает трудности с капчей"
+        return "Испытывает трудности с капчей"
     if total >= 3 and success_rate >= 80:
         if not any(s[3] <= 2 for s in successes if s[1] in ('средняя', 'тяжелая')):
-            return "✅ Стабильно проходит капчу"
+            return "Стабильно проходит капчу"
     if total == 1:
-        return "🥱 Успешная первая попытка" if success_count == 1 else "🥱 Неудачная первая попытка"
+        return "Успешная первая попытка" if success_count == 1 else "Неудачная первая попытка"
     return "ℹ️ Поведение не поддаётся однозначной классификации"
 
 
@@ -208,9 +209,9 @@ async def send_captcha_to_user(bot: Bot, user_id: int, chat_id: int, difficulty:
         answer, image_buffer, captcha_type = await captcha_generator.generate_captcha(difficulty)
         caption = (
             f"🔐 <b>Капча для доступа к чату</b>\n\n"
-            f"⏰ Время: <b>{format_duration(time_limit)}</b>\n"
-            f"🎯 Сложность: <b>{difficulty}</b>\n"
-            f"🔢 Попыток: <b>{attempts_limit}</b>\n\n"
+            f"Время: {format_duration(time_limit)}\n"
+            f"Сложность: {difficulty}\n"
+            f"Попыток: {attempts_limit}\n\n"
             f"<i>Введите текст с картинки:</i>"
         )
         await bot.send_photo(
@@ -256,7 +257,7 @@ async def captcha_timeout(chat_id: int, user_id: int, timeout: timedelta, bot: B
 
         if ban_success:
             try:
-                await bot.send_message(user_id, "❌ Время на прохождение капчи истекло. Вы были забанены.")
+                await bot.send_message(user_id, "Время на прохождение капчи истекло. Вы были забанены.")
             except:
                 pass
 
@@ -264,7 +265,7 @@ async def captcha_timeout(chat_id: int, user_id: int, timeout: timedelta, bot: B
                 user_link = await user_link_global(user_id)
                 await bot.send_message(
                     chat_id=chat_id,
-                    text=f"❌ {user_link} не прош{g('ол', gender)} капчу вовремя и был забан{g('ен', gender)}.",
+                    text=f"{user_link} не прош{g('ол', gender)} капчу вовремя и был забан{g('ен', gender)}.",
                     parse_mode="HTML"
                 )
             except:
@@ -324,22 +325,22 @@ async def handle_private_message(message: Message, bot: Bot):
                     pass
                 await add_captcha_history(session.chat_id, user_id, session.captcha_type, session.difficulty, True, time_taken)
             else:
-                await message.answer("❌ Ошибка при размуте. Обратитесь к администратору.")
+                await message.answer("Ошибка при размуте. Обратитесь к администратору.")
             active_captchas.pop((session.chat_id, user_id), None)
 
         else:
             remaining = session.attempts_limit - session.attempts
             if remaining > 0:
-                await message.answer(f"❌ Неправильный ответ! Осталось попыток: {remaining}")
+                await message.answer(f"Неправильный ответ! Осталось попыток: {remaining}")
             else:
                 try:
                     await bot.ban_chat_member(chat_id=session.chat_id, user_id=user_id)
-                    await message.answer("❌ Превышено количество попыток. Вы были забанены в чате.")
+                    await message.answer("Превышено количество попыток. Вы были забанены в чате.")
                     try:
                         user_link = await user_link_global(user_id)
                         await bot.send_message(
                             chat_id=session.chat_id,
-                            text=f"❌ {user_link} превысил лимит попыток прохождения капчи и был забанен.",
+                            text=f"{user_link} превысил лимит попыток прохождения капчи и был забанен.",
                             parse_mode="HTML"
                         )
                     except:
@@ -347,7 +348,7 @@ async def handle_private_message(message: Message, bot: Bot):
                     await add_captcha_history(session.chat_id, user_id, session.captcha_type, session.difficulty, False, time_taken)
                 except Exception as e:
                     logger.error(f"Ошибка бана при превышении попыток: {e}", exc_info=True)
-                    await message.answer("❌ Ошибка при бане. Обратитесь к администратору.")
+                    await message.answer("Ошибка при бане. Обратитесь к администратору.")
                 active_captchas.pop((session.chat_id, user_id), None)
 
 
@@ -362,9 +363,9 @@ async def enable_captcha_command_simple(message: Message):
     time_limit = format_duration(parse_time_string(time_limit_str) or timedelta(minutes=5))
     await message.answer(
         f"✅ <b>Капча включена!</b>\n\n"
-        f"🎯 Сложность: <b>средняя</b> (по умолчанию)\n"
-        f"⏰ Время: <b>{time_limit}</b>\n"
-        f"🔢 Попыток: <b>{attempts_limit}</b>\n\n"
+        f"Сложность: средняя (по умолчанию)\n"
+        f"Время: {time_limit}\n"
+        f"Попыток: {attempts_limit}\n\n"
         f"<i>Чтобы указать сложность, используйте:</i>\n"
         f"<code>+капча легкая</code>\n"
         f"<code>+капча тяжелая</code>\n"
@@ -379,20 +380,20 @@ async def enable_captcha_command_with_args(message: Message):
         return
     args = message.text[7:].strip()
     if not args:
-        await message.answer("❌ Укажите сложность капчи.", parse_mode="HTML")
+        await message.answer("Укажите сложность капчи.", parse_mode="HTML")
         return
     difficulty = args.lower()
     if difficulty not in ['легкая', 'средняя', 'тяжелая', 'хардкорд']:
-        await message.answer("❌ Неверная сложность.", parse_mode="HTML")
+        await message.answer("Неверная сложность.", parse_mode="HTML")
         return
     await enable_captcha(message.chat.id, difficulty)
     time_limit_str, _, attempts_limit, _ = await get_captcha_settings(message.chat.id)
     time_limit = format_duration(parse_time_string(time_limit_str) or timedelta(minutes=5))
     await message.answer(
         f"✅ <b>Капча включена!</b>\n\n"
-        f"🎯 Сложность: <b>{difficulty}</b>\n"
-        f"⏰ Время: <b>{time_limit}</b>\n"
-        f"🔢 Попыток: <b>{attempts_limit}</b>",
+        f"Сложность: {difficulty}\n"
+        f"Время: {time_limit}\n"
+        f"Попыток: {attempts_limit}",
         parse_mode="HTML"
     )
 
@@ -403,7 +404,7 @@ async def disable_captcha_command(message: Message):
         return
     await disable_captcha(message.chat.id)
     await message.answer(
-        "✅ <b>Капча выключена!</b>\n\n"
+        "✅ <b>Капча выключена!</b>\n"
         "Теперь новые участники смогут свободно писать в чате без прохождения капчи.",
         parse_mode="HTML"
     )
@@ -415,13 +416,13 @@ async def captcha_status(message: Message):
         return
     time_limit_str, difficulty, attempts_limit, enabled = await get_captcha_settings(message.chat.id)
     time_limit = format_duration(parse_time_string(time_limit_str) or timedelta(minutes=5))
-    status = "🟢 ВКЛЮЧЕНА" if enabled else "🔴 ВЫКЛЮЧЕНА"
+    status = "включена" if enabled else "выключена"
     response = (
         f"🔐 <b>Статус капчи в чате</b>\n\n"
-        f"📊 Статус: <b>{status}</b>\n"
-        f"🎯 Сложность: <b>{difficulty}</b>\n"
-        f"⏰ Время: <b>{time_limit}</b>\n"
-        f"🔢 Попыток: <b>{attempts_limit}</b>\n\n"
+        f"Статус: {status}\n"
+        f"Сложность: {difficulty}\n"
+        f"Время: {time_limit}\n"
+        f"Попыток: {attempts_limit}\n\n"
     )
     if enabled:
         response += (
@@ -444,19 +445,18 @@ async def captcha_status(message: Message):
 @captcha_router.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?капча период', re.IGNORECASE)))
 async def set_captcha_period(message: Message):
     if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 44):
-        await message.answer("❌ У вас недостаточно прав для этой команды.")
         return
     text = message.text.strip()
     if text and text[0] in '!./':
         text = text[1:].strip()
     parts = text.split(maxsplit=2)
     if len(parts) < 3:
-        await message.answer("❌ Укажите время для капчи. Пример: <code>капча период 5 минут</code>", parse_mode="HTML")
+        await message.answer("Укажите время для капчи. Пример: <code>капча период 5 минут</code>", parse_mode="HTML")
         return
     time_input = parts[2].strip()
     parsed_duration = parse_time_string(time_input)
     if parsed_duration is None:
-        await message.answer("❌ Не удалось распознать время.", parse_mode="HTML")
+        await message.answer("Не удалось распознать время.", parse_mode="HTML")
         return
     await update_captcha_settings(message.chat.id, time_limit=time_input)
     formatted = format_duration(parsed_duration)
@@ -466,18 +466,17 @@ async def set_captcha_period(message: Message):
 @captcha_router.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?капча сложность', re.IGNORECASE)))
 async def set_captcha_difficulty(message: Message):
     if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 44):
-        await message.answer("❌ У вас недостаточно прав для этой команды.")
         return
     text = message.text.strip()
     if text and text[0] in '!./':
         text = text[1:].strip()
     parts = text.split(maxsplit=2)
     if len(parts) < 3:
-        await message.answer("❌ Укажите сложность капчи.", parse_mode="HTML")
+        await message.answer("Укажите сложность капчи.", parse_mode="HTML")
         return
     difficulty = parts[2].strip().lower()
     if difficulty not in ['легкая', 'средняя', 'тяжелая', 'хардкорд']:
-        await message.answer("❌ Неверная сложность.", parse_mode="HTML")
+        await message.answer("Неверная сложность.", parse_mode="HTML")
         return
     await update_captcha_settings(message.chat.id, difficulty=difficulty)
     await message.answer(f"✅ Сложность капчи установлена: <b>{difficulty}</b>", parse_mode="HTML")
@@ -492,14 +491,14 @@ async def set_captcha_attempts(message: Message):
         text = text[1:].strip()
     parts = text.split(maxsplit=2)
     if len(parts) < 3:
-        await message.answer("❌ Укажите количество попыток (1–10).", parse_mode="HTML")
+        await message.answer("Укажите количество попыток (1–10).", parse_mode="HTML")
         return
     try:
         attempts = int(parts[2].strip())
         if not (1 <= attempts <= 10):
             raise ValueError
     except ValueError:
-        await message.answer("❌ Укажите число от 1 до 10.", parse_mode="HTML")
+        await message.answer("Укажите число от 1 до 10.", parse_mode="HTML")
         return
     await update_captcha_settings(message.chat.id, attempts_limit=attempts)
     await message.answer(f"✅ Лимит попыток для капчи установлен: <b>{attempts}</b>", parse_mode="HTML")
@@ -545,7 +544,7 @@ async def check_captcha_history(message: Message):
     # Если user_id не найден
     if not user_id:
         await message.answer(
-            "❌ Пользователь не найден."
+            "Пользователь не найден."
         )
         return
 
@@ -603,7 +602,6 @@ async def show_user_captcha_history(message: Message, user_id: int, page: int = 
 @captcha_router.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?капча инфо', re.IGNORECASE)))
 async def show_captcha_info(message: Message):
     if not await auto_check_AccessLevel_for_rang(message.from_user.id, message.chat.id, 45):
-        await message.answer("❌ У вас недостаточно прав для этой команды.")
         return
 
     if message.reply_to_message:
@@ -640,15 +638,13 @@ async def show_captcha_info(message: Message):
         time_str = format_duration(timedelta(seconds=time_taken))
         date_str = timestamp.strftime("%d.%m.%Y %H:%M")
 
-        difficulty_emoji = {"легкая": "🟢", "средняя": "🟡", "тяжелая": "🔴", "хардкорд": "⚫"}.get(difficulty, "⚪")
-
         response = (
             f"ℹ️ <b>Информация о капче</b>\n\n"
-            f"👤 Пользователь: {user_link}\n"
-            f"📊 Статус: {status}\n"
-            f"⚡ Сложность: {difficulty_emoji} {difficulty}\n"
-            f"⏱️ Время: {time_str}\n"
-            f"📅 Дата: {date_str}"
+            f"Пользователь: {user_link}\n"
+            f"Статус: {status}\n"
+            f"Сложность: {difficulty}\n"
+            f"Время: {time_str}\n"
+            f"Дата: {date_str}"
         )
         await message.reply(response, parse_mode="HTML", disable_web_page_preview=True)
     else:
@@ -662,7 +658,7 @@ async def show_all_captcha_users(message: Message, page: int = 0):
     total_users = await get_total_captcha_users_count(chat_id)
 
     if not users:
-        await message.reply("📝 В этом чате еще никто не проходил капчу.", parse_mode="HTML")
+        await message.reply("В этом чате еще никто не проходил капчу.", parse_mode="HTML")
         return
 
     response = "📋 <b>Пользователи, проходившие капчу:</b>\n\n"
@@ -673,18 +669,16 @@ async def show_all_captcha_users(message: Message, page: int = 0):
 
         if recent_captcha:
             difficulty, time_taken, timestamp, success = recent_captcha
-            status = f"✅ прош{g('ел', gender)}" if success else f"❌ не прош{g('ел', gender)}"
+            status = f"прош{g('ел', gender)}" if success else f"не прош{g('ел', gender)}"
             time_str = format_duration(timedelta(seconds=time_taken))
-            difficulty_emoji = {"легкая": "🟢", "средняя": "🟡", "тяжелая": "🔴", "хардкорд": "⚫"}.get(difficulty, "⚪")
-            date_str = timestamp.strftime("%d.%m.%Y %H:%M")
-            response += f"{i}. {user_link} - {status} {difficulty_emoji} {difficulty} за {time_str}\n"
+            response += f"{i}. {user_link} - {status} {difficulty} за {time_str}\n"
         else:
             response += f"{i}. {user_link} - нет данных\n"
 
     total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
     if total_pages > 1:
         response += f"\n📄 Страница {page + 1} из {total_pages}"
-    response += f"\n👥 Всего пользователей: {total_users}"
+    response += f"\nВсего пользователей: {total_users}"
 
     keyboard = []
     if total_pages > 1:

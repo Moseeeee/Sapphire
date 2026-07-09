@@ -79,11 +79,11 @@ async def add_note_handler(message: Message):
 
         # Валидация
         if not note_name:
-            await message.reply("❌ Укажите название заметки после команды")
+            await message.reply("Укажите название заметки после команды")
             return
 
         if not note_text:
-            await message.reply('⚠️ Укажите текст заметки после названия, начиная с новой строки.')
+            await message.reply('Укажите текст заметки после названия, начиная с новой строки.')
             return
 
         # Получаем HTML-текст для сохранения форматирования
@@ -101,7 +101,7 @@ async def add_note_handler(message: Message):
         # Проверяем, существует ли уже заметка с таким названием
         existing_note = await get_note_by_name(message.chat.id, note_name)
         if existing_note:
-            await message.reply("❌ Заметка с таким названием уже существует")
+            await message.reply("Заметка с таким названием уже существует")
             return
 
         # Проверка на ссылки
@@ -126,7 +126,7 @@ async def add_note_handler(message: Message):
                     disable_web_page_preview=True
                 )
 
-                await message.reply('⚠️ Заметка отправлена на проверку, ожидайте.')
+                await message.reply('Заметка отправлена на проверку, ожидайте.')
 
                 # Проверяем существующую запись модерации
                 existing = await get_pending_moderation_note(chat_id, note_name)
@@ -160,11 +160,11 @@ async def add_note_handler(message: Message):
             if result.get('success', False):
                 await message.reply(f"✅ Заметка «{note_name}» добавлена")
             else:
-                await message.reply(f"❌ Ошибка при добавлении заметки: {result.get('error', 'Неизвестная ошибка')}")
+                await message.reply(f"Ошибка при добавлении заметки: {result.get('error', 'Неизвестная ошибка')}")
 
     except Exception as e:
         logger.error(f"Ошибка в add_note_handler: {e}", exc_info=True)
-        await message.reply("❌ Произошла ошибка при добавлении заметки")
+        await message.reply("Произошла ошибка при добавлении заметки")
 
 
 @notes_router.message(lambda m: m.text and m.text.lower().startswith("-заметка"))
@@ -179,13 +179,13 @@ async def delete_note_handler(message: Message):
         identifier = get_command_args(message.text, "-заметка")
 
         if not identifier:
-            await message.reply("❌ Укажите название или номер заметки для удаления")
+            await message.reply("Укажите название или номер заметки для удаления")
             return
 
         # Получаем заметку перед удалением, чтобы показать название
         note = await get_note(message.chat.id, identifier)
         if not note:
-            await message.reply("❌ Заметка не найдена")
+            await message.reply("Заметка не найдена")
             return
 
         # Удаляем заметку
@@ -194,11 +194,11 @@ async def delete_note_handler(message: Message):
         if success:
             await message.reply(f"✅ Заметка «{note['notes_name']}» удалена")
         else:
-            await message.reply("❌ Ошибка при удалении заметки")
+            await message.reply("Ошибка при удалении заметки")
 
     except Exception as e:
         logger.error(f"Ошибка в delete_note_handler: {e}", exc_info=True)
-        await message.reply("❌ Произошла ошибка при удалении заметки")
+        await message.reply("Произошла ошибка при удалении заметки")
 
 
 @notes_router.message(lambda m: m.text and m.text.lower().startswith("~заметка"))
@@ -214,17 +214,17 @@ async def edit_note_content_handler(message: Message):
 
         # Валидация
         if not note_identifier:
-            await message.reply("❌ Укажите название или номер заметки для редактирования")
+            await message.reply("Укажите название или номер заметки для редактирования")
             return
 
         if not note_text:
-            await message.reply('⚠️ Укажите новый текст заметки после названия/номера, начиная с новой строки.')
+            await message.reply('Укажите новый текст заметки после названия/номера, начиная с новой строки.')
             return
 
         # Проверяем существование заметки
         current_note = await get_note(message.chat.id, note_identifier)
         if not current_note:
-            await message.reply("❌ Заметка не найдена")
+            await message.reply("Заметка не найдена")
             return
 
         note_name = current_note['notes_name']
@@ -262,7 +262,7 @@ async def edit_note_content_handler(message: Message):
                     disable_web_page_preview=True
                 )
 
-                await message.reply('⚠️ Изменения отправлены на проверку, ожидайте.')
+                await message.reply('Изменения отправлены на проверку, ожидайте.')
 
                 # Сохраняем в БД модерации с is_edit=True
                 await add_pending_moderation_note(
@@ -276,7 +276,7 @@ async def edit_note_content_handler(message: Message):
                 )
 
             except Exception as e:
-                await message.reply('❌ Ошибка при отправке на модерацию.')
+                await message.reply('Ошибка при отправке на модерацию.')
                 logger.error(f"Ошибка при отправке на модерацию: {e}", exc_info=True)
                 return
 
@@ -287,11 +287,11 @@ async def edit_note_content_handler(message: Message):
             if success:
                 await message.reply(f"✅ Заметка «{note_name}» обновлена")
             else:
-                await message.reply("❌ Ошибка при обновлении заметки")
+                await message.reply("Ошибка при обновлении заметки")
 
     except Exception as e:
         logger.error(f"Ошибка в edit_note_content_handler: {e}", exc_info=True)
-        await message.reply("❌ Произошла ошибка при редактировании заметки")
+        await message.reply("Произошла ошибка при редактировании заметки")
 
 
 @notes_router.message(lambda m: m.text and m.text.lower().startswith("~название заметки"))
@@ -305,7 +305,7 @@ async def rename_note_handler(message: Message):
         # Получаем аргументы
         args = message.text.split(maxsplit=3)
         if len(args) < 4:
-            await message.reply("❌ Формат команды: ~название заметки {старое_название/номер} {новое_название}")
+            await message.reply("Формат команды: ~название заметки {старое_название/номер} {новое_название}")
             return
 
         old_identifier = args[2].strip()
@@ -313,23 +313,23 @@ async def rename_note_handler(message: Message):
 
         # Валидация
         if not new_name:
-            await message.reply("❌ Укажите новое название заметки")
+            await message.reply("Укажите новое название заметки")
             return
 
         if len(new_name) > 100:
-            await message.reply("❌ Название заметки не должно превышать 100 символов")
+            await message.reply("Название заметки не должно превышать 100 символов")
             return
 
         # Получаем текущую заметку
         current_note = await get_note(message.chat.id, old_identifier)
         if not current_note:
-            await message.reply("❌ Заметка не найдена")
+            await message.reply("Заметка не найдена")
             return
 
         # Проверяем, не существует ли уже заметка с таким названием
         existing_note = await get_note_by_name(message.chat.id, new_name)
         if existing_note and existing_note['notes_name'] != current_note['notes_name']:
-            await message.reply("❌ Заметка с таким названием уже существует")
+            await message.reply("Заметка с таким названием уже существует")
             return
 
         # Переименовываем
@@ -338,11 +338,11 @@ async def rename_note_handler(message: Message):
         if success:
             await message.reply(f"✅ Заметка «{current_note['notes_name']}» переименована в «{new_name}»")
         else:
-            await message.reply("❌ Ошибка при переименовании заметки")
+            await message.reply("Ошибка при переименовании заметки")
 
     except Exception as e:
         logger.error(f"Ошибка в rename_note_handler: {e}", exc_info=True)
-        await message.reply("❌ Произошла ошибка при переименовании заметки")
+        await message.reply("Произошла ошибка при переименовании заметки")
 
 
 @notes_router.message(lambda m: m.text and m.text.lower().startswith("/заметка"))
@@ -387,11 +387,11 @@ async def show_note_handler(message: Message):
                 reply_to_message_id=reply_to_message_id  # Передаем ID сообщения для ответа
             )
         else:
-            await message.reply("❌ Заметка не найдена")
+            await message.reply("Заметка не найдена")
 
     except Exception as e:
         logger.error(f"Ошибка в show_note_handler: {e}", exc_info=True)
-        await message.reply("❌ Произошла ошибка при поиске заметки")
+        await message.reply("Произошла ошибка при поиске заметки")
 
 
 # Константы для пагинации
@@ -410,7 +410,7 @@ async def list_notes_handler(message: Message):
 
     except Exception as e:
         logger.error(f"Ошибка в list_notes_handler: {e}", exc_info=True)
-        await message.reply("❌ Произошла ошибка при получении списка заметок")
+        await message.reply("Произошла ошибка при получении списка заметок")
 
 
 
@@ -427,9 +427,9 @@ async def show_notes_page(message: Message, page: int, search_term: str = None, 
 
         if not notes:
             if search_term:
-                response = "🔍 Заметка не найдена"
+                response = "Заметка не найдена"
             else:
-                response = "📭 В этом чате нет заметок"
+                response = "В этом чате нет заметок"
 
             if edit_message:
                 await message.edit_text(response)
@@ -464,7 +464,7 @@ async def show_notes_page(message: Message, page: int, search_term: str = None, 
     except Exception as e:
         logger.error(f"Ошибка в show_notes_page: {e}", exc_info=True)
         if not edit_message:
-            await message.reply("❌ Произошла ошибка при отображении заметок")
+            await message.reply("Произошла ошибка при отображении заметок")
 
 
 def create_pagination_keyboard(current_page: int, total_pages: int, search_term: str = None):
@@ -503,7 +503,7 @@ async def search_notes_handler(message: Message):
         # Получаем аргумент (поисковый запрос)
         args = message.text.split(maxsplit=2)
         if len(args) < 3:
-            await message.reply("❌ Укажите текст для поиска")
+            await message.reply("Укажите текст для поиска")
             return
 
         search_term = args[2].strip()
@@ -511,7 +511,7 @@ async def search_notes_handler(message: Message):
 
     except Exception as e:
         logger.error(f"Ошибка в search_notes_handler: {e}", exc_info=True)
-        await message.reply("❌ Произошла ошибка при поиске заметок")
+        await message.reply("Произошла ошибка при поиске заметок")
 
 
 # Обработчики callback-запросов для пагинации
@@ -522,7 +522,7 @@ async def handle_notes_pagination(callback: types.CallbackQuery):
     try:
         # Проверяем права пользователя
         if not await auto_check_AccessLevel_for_rang(callback.from_user.id, callback.message.chat.id, 52):
-            await callback.answer("❌ У вас недостаточно прав", show_alert=True)
+            await callback.answer("У вас недостаточно прав", show_alert=True)
             return
 
         # Проверяем, что пользователь является отправителем исходного сообщения
@@ -534,12 +534,12 @@ async def handle_notes_pagination(callback: types.CallbackQuery):
         else:
             # Если нет reply_to_message, проверяем чат
             if callback.from_user.id != callback.message.chat.id:
-                await callback.answer("❌ Эта кнопка не для вас", show_alert=True)
+                await callback.answer("Эта кнопка не для вас", show_alert=True)
                 return
 
         data = callback.data.split(":")
         if len(data) < 2:
-            await callback.answer("❌ Неверный формат данных", show_alert=True)
+            await callback.answer("Неверный формат данных", show_alert=True)
             return
 
         action = data[0]
@@ -559,7 +559,7 @@ async def handle_notes_pagination(callback: types.CallbackQuery):
         await callback.answer()
 
     except ValueError:
-        await callback.answer("❌ Ошибка в данных пагинации", show_alert=True)
+        await callback.answer("Ошибка в данных пагинации", show_alert=True)
     except Exception as e:
         logger.error(f"Ошибка в handle_notes_pagination: {e}", exc_info=True)
-        await callback.answer("❌ Произошла ошибка при переключении страницы", show_alert=True)
+        await callback.answer("Произошла ошибка при переключении страницы", show_alert=True)

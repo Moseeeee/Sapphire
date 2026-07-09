@@ -19,7 +19,7 @@ from handlers.BotAutomaticWork.universal_bot import bot
 from handlers.BotAutomaticWork.users.GenderUtils import g
 from handlers.BotAutomaticWork.users.checks.acces_commands.check_access_rang import auto_check_AccessLevel_for_rang
 from handlers.BotAutomaticWork.users.checks.check_flood_inline_and_text import rate_limit_with_cleanup, get_random_text
-from handlers.BotAutomaticWork.users.checks.check_users_id import resolve_id
+from BotAutomaticWork.users.checks.check_UserId.check_users_id import resolve_id
 from handlers.BotAutomaticWork.users.links.usersLinksUtils.users_global_link import user_link_global
 from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettingsDB import get_user_gender
 
@@ -166,7 +166,7 @@ async def parse_time_improved(time_str: str):
             try:
                 value = int(match)
                 total_seconds += value * multiplier
-                logger.info(f"Найдено: {value} {unit_name} = {value * multiplier} секунд")
+                #logger.info(f"Найдено: {value} {unit_name} = {value * multiplier} секунд")
             except ValueError:
                 continue
 
@@ -179,15 +179,15 @@ async def parse_time_improved(time_str: str):
 
     # Пробуем еще раз стандартный парсинг на очищенной строке
     # Убираем лишние слова и оставляем только числа и буквы времени
-    cleaned = re.sub(r'[^\d\sчмнднсекгуаяитль]', '', time_str)
+    cleaned = re.sub(r'[^\d\sчмндсекгуаяитль]', '', time_str)
     if cleaned != time_str:
         parsed = parse_time_string(cleaned)
         if parsed is not None:
             return parsed
 
-    logger.warning(f"Не удалось распарсить время: '{time_str}'")
+    #logger.warning(f"Не удалось распарсить время: '{time_str}'")
     return None
-
+update_mute_info_type
 # ======================
 # Хендлеры команд мутов
 # ======================
@@ -206,7 +206,7 @@ async def set_default_mute_period(m: Message):
     parts = text.split(maxsplit=2)
     if len(parts) < 3:
         await m.answer(
-            "❌ Укажите длительность мута по умолчанию.\n"
+            "<b>Укажите длительность мута по умолчанию.</b>\n"
             "Пример: <code>муты период 3 дня</code>\n"
             "Или: <code>муты период навсегда</code>",
             parse_mode="HTML"
@@ -223,7 +223,7 @@ async def set_default_mute_period(m: Message):
     parsed_duration = parse_time_string(duration_input)
     if parsed_duration is None:
         await m.answer(
-            "❌ Не удалось распознать время. Используйте формат: <code>1 день 2 часа 30 минут</code>",
+            "<b>Не удалось распознать время.</b>\nИспользуйте формат: <code>1 день 2 часа 30 минут</code>",
             parse_mode="HTML"
         )
         return
@@ -251,7 +251,7 @@ async def unmute_users(m: Message):
     else:
         if len(parts) < 2 or not parts[1].strip():
             await m.answer(
-                "❌ <b>Неверный формат команды!</b>\nИспользуйте: размут {@username} или ответьте на сообщение",
+                "<b>Неверный формат команды!</b>\nИспользуйте: размут {@username} или ответьте на сообщение",
                 parse_mode='HTML'
             )
             return
@@ -285,7 +285,7 @@ async def unmute_users(m: Message):
                         admin_link = await user_link_global(ManagementAdminId)
 
                         await m.answer(
-                            f"😏 {admin_link}, вы пытаетесь размутить пользователя, которого замутил администратор высшего ранга ({admin_who_muted_link})!\n",
+                            f"{admin_link}, вы пытаетесь размутить пользователя, которого замутил администратор высшего ранга ({admin_who_muted_link})!\n",
                             parse_mode='HTML',
                             disable_web_page_preview=True
                         )
@@ -331,7 +331,7 @@ async def unmute_users(m: Message):
             disable_web_page_preview=True
         )
     else:
-        await m.answer("❌ Ошибка при размуте")
+        await m.answer("Ошибка при размуте")
 
 
 @mute.message(F.text.regexp(re.compile(r'^(?:[!./]:?)?мутлист(\s|$)', re.IGNORECASE)))
@@ -370,7 +370,7 @@ async def mute_list(m: Message):
 
     if not mutes_list:
 
-        await m.answer("📝 В этом чате нет замученных пользователей.")
+        await m.answer("В этом чате нет замученных пользователей.")
         return
 
     response = f"📋 <b>Список мутов</b> (Страница {page + 1}/{max(1, total_pages)})\n\n"
@@ -454,7 +454,7 @@ async def mute_info(m: Message):
     else:
         if len(parts) < 2:
             await m.answer(
-                "❌ <b>Неверный формат команды!</b>\nИспользуйте: мут инфо {@username} или ответьте на сообщение",
+                "<b>Неверный формат команды!</b>\nИспользуйте: мут инфо {@username} или ответьте на сообщение",
                 parse_mode='HTML'
             )
             return
@@ -504,7 +504,7 @@ async def mute_info(m: Message):
                 time_left = time_end - current_time
 
                 if time_left.total_seconds() <= 0:
-                    time_text = "⏰ Мут истек"
+                    time_text = "Мут истек"
                     status = "🟢"
                 else:
                     actual_time_left = format_duration(time_left)
@@ -512,7 +512,7 @@ async def mute_info(m: Message):
                     status = "🔴"
             except Exception as e:
                 logger.error(f"Error parsing time: {e}")
-                time_text = "⚠️ Ошибка времени"
+                time_text = "Ошибка расчёта времени"
                 status = "⚠️"
 
     response = (
@@ -564,7 +564,7 @@ async def mute_users(m: Message):
         time_str = None
 
         if len(parts) < 2:
-            await m.reply('⚠️ Пользователь не указан!\n\n'
+            await m.reply('<b>Пользователь не указан!</b>\n\n'
                           'Используйте один из способов:\n'
                           '1. Ответьте на сообщение пользователя\n'
                           '2. Укажите @username или ID пользователя\n'
@@ -607,7 +607,7 @@ async def mute_users(m: Message):
 
         # Если все еще не нашли пользователя
         if not UserId:
-            await m.reply('⚠️ Пользователь не указан или не найден!\n\n'
+            await m.reply('<b>Пользователь не указан или не найден!</b>\n\n'
                           'Используйте один из способов:\n'
                           '1. Ответьте на сообщение пользователя\n'
                           '2. Укажите @username или ID пользователя\n'
@@ -649,13 +649,13 @@ async def mute_users(m: Message):
                         # Шутливые ответы в зависимости от ситуации
                         if UserRang == ManagementRang:
                             await m.answer(
-                                f"😂 {admin_link}, вы пытаетесь замутить администратора такого же ранга, как вы!\n",
+                                f"{admin_link}, вы пытаетесь замутить администратора такого же ранга, как вы!\n",
                                 parse_mode='HTML',
                                 disable_web_page_preview=True
                             )
                         else:
                             await m.answer(
-                                f"😏 {admin_link}, вы пытаетесь замутить администратора высшего ранга!\n",
+                                f"{admin_link}, вы пытаетесь замутить администратора высшего ранга!\n",
                                 parse_mode='HTML',
                                 disable_web_page_preview=True
                             )
@@ -737,7 +737,7 @@ async def mute_users(m: Message):
     # Если все еще не определили длительность
     if mute_duration is None:
         # logger.error(f"Не удалось определить длительность для: '{time_str}'")
-        await m.answer(f"❌ Не удалось распознать время: {time_str}")
+        await m.answer(f"Не удалось распознать время: {time_str}")
         return
 
     user_link = await user_link_global(UserId)
@@ -774,7 +774,7 @@ async def mute_users(m: Message):
             disable_web_page_preview=True
         )
     else:
-        await m.answer(f"❌ Ошибка при муте: {result}")
+        await m.answer(f"Ошибка при муте: {result}")
 
 
 @mute.callback_query(lambda c: c.data.startswith('mutelist_'))

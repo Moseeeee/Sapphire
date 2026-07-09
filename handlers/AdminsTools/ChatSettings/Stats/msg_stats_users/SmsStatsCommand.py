@@ -7,6 +7,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from BotAutomaticWork.Middleware.SmartIntRefreshed import SmartInt
 from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.SmsStatsDB import get_stats, save_message_batch, \
     get_user_stats
 from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.msg_stats_cache import MESSAGE_CACHE
@@ -57,12 +58,12 @@ async def format_stats(chat_id: int, period: str, page: int = 0) -> Tuple[str, I
         raw_stats = await get_stats(chat_id, stats_period)
     except Exception as e:
         logger.error(e, exc_info=True)
-        return "🚫 Ошибка при получении статистики.", None
+        return "Ошибка при получении статистики.", None
 
     total_users = len(raw_stats)
 
     if not raw_stats:
-        return "🚫 Нет данных за этот период.", None
+        return "Нет данных за этот период.", None
 
     # Пагинация
     start = page * ITEMS_PER_PAGE
@@ -70,7 +71,7 @@ async def format_stats(chat_id: int, period: str, page: int = 0) -> Tuple[str, I
     page_stats = raw_stats[start:end]
 
     if not page_stats:
-        return "🚫 Нет данных на этой странице.", None
+        return "Нет данных на этой странице.", None
 
     # Форматируем статистику
     lines = []
@@ -79,14 +80,15 @@ async def format_stats(chat_id: int, period: str, page: int = 0) -> Tuple[str, I
             mention = await user_link_with_pseudonym(user_id, chat_id)
         except:
             mention = f"ID {user_id}"
-        lines.append(f"{i}. {mention} — {count}")
+        count_int = SmartInt(count)
+        lines.append(f"{i}. {mention} — {count_int}")
 
     period_name = PERIODS.get(period, period)
-    total_messages = sum(count for _, _, count in raw_stats)
+    total_messages = SmartInt(sum(count for _, _, count in raw_stats))
 
     text = f"📈 Статистика сообщений за {period_name}:\n"
     text += "\n".join(lines)
-    text += f"\n\n📨 Всего сообщений: {total_messages}"
+    text += f"\n\nВсего сообщений: {total_messages}"
 
     # Создаем клавиатуру только если есть необходимость в пагинации
     kb = build_keyboard(chat_id, period, page, total_users) if total_users > ITEMS_PER_PAGE else None
@@ -121,7 +123,7 @@ async def cmd_stats(message: types.Message):
         arg = args[0].lower()
 
     if arg not in PERIODS:
-        await message.answer("❌ Неверный период. Используй: день, неделя, месяц, год, всего, вся.")
+        await message.answer("Неверный период. Используй: день, неделя, месяц, год, всего, вся.")
         return
 
     text, kb = await format_stats(chat_id, arg)
@@ -148,7 +150,7 @@ async def cb_stats(callback: types.CallbackQuery):
         raw_stats = await get_stats(chat_id, stats_period)
     except Exception as e:
         logging.error(e)
-        await callback.answer("🚫 Ошибка при получении статистики.", show_alert=True)
+        await callback.answer("Ошибка при получении статистики.", show_alert=True)
         return
 
     total_users = len(raw_stats)
@@ -156,7 +158,7 @@ async def cb_stats(callback: types.CallbackQuery):
     # Проверяем, есть ли данные на запрошенной странице
     start = page * ITEMS_PER_PAGE
     if start >= total_users:
-        await callback.answer("🚫 Больше нет данных для отображения.", show_alert=False)
+        await callback.answer("Больше нет данных для отображения.", show_alert=False)
         return
 
     text, kb = await format_stats(chat_id, period, page)
