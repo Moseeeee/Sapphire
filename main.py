@@ -1,124 +1,110 @@
 
-
 import asyncio
-import importlib
-import logging
-import sys
 
+import logging
+import os
+import sys
+import signal
+from typing import List
+
+import orjson
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.memory import MemoryStorage
-
-from handlers.AdminsTools.ChatSettings.message_pinned.pin_sms import cleanup_expired_pins
-from handlers.AgentsFeatures.server_info import start_background_ping_monitor, stop_background_ping_monitor
-from handlers.BotAutomaticWork.ActiveBotMiddleware import ActiveBotMiddleware
-from handlers.BotAutomaticWork.BotCreatedGlobal import get_bot_by_token
-from handlers.BotAutomaticWork.Gonfig.multi_bot_config import MultiBotConfig
-
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('bot_system.log', encoding='utf-8')
-    ]
-)
-logger = logging.getLogger(__name__)
+from aiogram import types, BaseMiddleware
 
 
-async def reload_all_handlers():
-    """Перезагрузить все хендлеры"""
-    modules_to_reload = [
-        # Основные
-        'handlers.start',
+# --- ОПТИМИЗАЦИЯ СЕТИ ---
+if sys.platform != 'win32':
+    try:
+        import uvloop
 
-        # AgentsFeatures
-        'handlers.AgentsFeatures.AgentCheckPing',
-        'handlers.AgentsFeatures.ManagementAgents.ManagementAgents',
-        'handlers.AgentsFeatures.server_info',
-        'handlers.AgentsFeatures.AntiSpam.AntiSpam',
-        'handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovals',
-        'handlers.AgentsFeatures.ManagementAgents.AgentChatsAndChannelsdminsManagement',
-        'handlers.AgentsFeatures.add_AntiSpamAndIgnore',
-        'handlers.AgentsFeatures.ignoreUsers.ignore_manager',
-
-        # AdminsTools
-        'handlers.AdminsTools.ChatSettings.AntiSpamSettings.AntiSpamSettings',
-        'handlers.AdminsTools.ChatSettings.ChatAdmins.add_tg_admin',
-        'handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.SmsStatsCommand',
-        'handlers.AdminsTools.ChatSettings.delete_message_chat',
-        'handlers.AdminsTools.ChatSettings.message_pinned.pin_sms',
-        'handlers.AdminsTools.ChatSettings.notes.notes',
-        'handlers.AdminsTools.ChatSettings.reports.report_statistics.report_statistics',
-        'handlers.AdminsTools.check_views_chats_message',
-        'handlers.AdminsTools.ChatSettings.DkCommands.CheckDkInfo',
-        'handlers.AdminsTools.CommandsModerations.bans.ban',
-        'handlers.AdminsTools.ChatSettings.captcha.captcha_main',
-        'handlers.AdminsTools.ChatSettings.Stats.ChatsUsersStats.chat_users_stats',
-        'handlers.AdminsTools.CommandsModerations.mute.mute',
-        'handlers.AdminsTools.ChatSettings.PuchCommandSettings.puch_command_settings',
-        'handlers.AdminsTools.CommandsModerations.warns.warns',
-        'handlers.AdminsTools.ChatSettings.welcome.welcome',
-        'handlers.AdminsTools.ChatSettings.rules.rules',
-        'handlers.AdminsTools.ChatSettings.reports.reports',
-        'handlers.AdminsTools.ChatSettings.AlertsEdits.AlertsEdits',
-        'handlers.AdminsTools.ChatSettings.ChatAdmins.ChatAdmins',
-        'handlers.AdminsTools.ChatSettings.DkCommands.UpdateCommandSettings',
-
-        # UserCommands
-        'handlers.UserCommands.GenderSettings.GenderSettings',
-        'handlers.UserCommands.user_profile',
-        'from handlers.UserCommands.weather'
-
-        # Другие
-        'handlers.testDirectiry.chat_settings',
-        'handlers.testDirectiry.UpdateChatInfo',
-        'handlers.BotAutomaticWork.AddChatsBot.AddChatsBot',
-        'handlers.testing',
-        'handlers.AgentsFeatures.payment.payment',
-        'handlers.testDirectiry.ChatSettingsAutomatic.ChatSettings'
-        'from handlers.testDirectiry.testing'
-    ]
-
-    for module_name in modules_to_reload:
-        try:
-            if module_name in sys.modules:
-                importlib.reload(sys.modules[module_name])
-            else:
-                importlib.import_module(module_name)
-            logger.debug(f"✅ Перезагружен: {module_name}")
-        except Exception as e:
-            logger.debug(f"⚠️ Не удалось перезагрузить {module_name}: {e}")
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    except ImportError:
+        pass
 
 
-async def load_all_routers():
-    """Загрузить все роутеры после перезагрузки"""
-    # Основные
+# --- НАСТРОЙКА ЛОГИРОВАНИЯ ---
+def setup_logging():
+    root_logger = logging.getLogger()
+    if root_logger.hasHandlers():
+        return root_logger
+
+    root_logger.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        '%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
+
+    # Консоль
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # Тишина для шумных библиотек
+    for logger_name in ['aiogram.event', 'asyncio', 'aiohttp', 'urllib3']:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+    return root_logger
+
+
+logger = setup_logging()
+
+
+# --- MIDDLEWARES ---
+
+class ForwardBlockerMiddleware(BaseMiddleware):
+    """Оптимизированная блокировка пересланных сообщений"""
+
+    def __init__(self, bot_name: str):
+        self.bot_name = bot_name
+        super().__init__()
+
+    async def __call__(self, handler, event: types.Message, data: dict):
+        if not isinstance(event, types.Message):
+            return await handler(event, data)
+
+        # 1. Пропускаем авто-постинг из каналов
+        if event.is_automatic_forward:
+            return await handler(event, data)
+
+        # 2. Проверяем ручной пересыл
+        is_forwarded = any([
+            event.forward_date, event.forward_from,
+            event.forward_from_chat, event.forward_sender_name
+        ])
+
+        if is_forwarded:
+            # Проверка на связанный канал (опционально, кэшируйте результат get_chat)
+            #logger.debug(f"🚫 [{self.bot_name}] Сообщение заблокировано (Forward)")
+            return
+
+        return await handler(event, data)
+
+
+# --- ЗАГРУЗКА КОМПОНЕНТОВ ---
+
+def get_all_routers() -> List:
     from handlers.start import router as start_router
-
-    # AgentsFeatures
     from handlers.AgentsFeatures.AgentCheckPing import pingin
     from handlers.AgentsFeatures.ManagementAgents.ManagementAgents import aa
-    from handlers.AgentsFeatures.server_info import server_stats_router
+    from handlers.AgentsFeatures.help_files.help_users import help_user
+    from handlers.sanor_commands.server_info import server_stats_router
     from handlers.AgentsFeatures.AntiSpam.AntiSpam import as_router
     from handlers.AgentsFeatures.CheckTextApprovals.CheckTextApprovals import check_text_agents_router
     from handlers.AgentsFeatures.ManagementAgents.AgentChatsAndChannelsdminsManagement import agent_admin_management
     from handlers.AgentsFeatures.add_AntiSpamAndIgnore import as_ignore_router
     from handlers.AgentsFeatures.ignoreUsers.ignore_manager import ignore_router
-
-    # AdminsTools
     from handlers.AdminsTools.ChatSettings.AntiSpamSettings.AntiSpamSettings import ACSettings
-    from handlers.AdminsTools.ChatSettings.ChatAdmins.add_tg_admin import tg_admin_management
+    from AdminsTools.ChatSettings.rights_participation_cats.add_tg_admin import tg_admin_management
     from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.SmsStatsCommand import UCS
-    #from handlers.AdminsTools.ChatSettings.delete_message_chat import sms_cleanup
     from handlers.AdminsTools.ChatSettings.message_pinned.pin_sms import pin_sms
     from handlers.AdminsTools.ChatSettings.notes.notes import notes_router
     from handlers.AdminsTools.ChatSettings.reports.report_statistics.report_statistics import report_statistics
     from handlers.AdminsTools.check_views_chats_message import CVCM
-    from handlers.AdminsTools.ChatSettings.DkCommands.CheckDkInfo import CheckDk
     from handlers.AdminsTools.CommandsModerations.bans.ban import bans
-    from handlers.AdminsTools.ChatSettings.captcha.captcha_main import captcha_router
+    from handlers.sanor_commands.chat_info.ChatsInfo import chat_info_router
     from handlers.AdminsTools.ChatSettings.Stats.ChatsUsersStats.chat_users_stats import CUS
     from handlers.AdminsTools.CommandsModerations.mute.mute import mute
     from handlers.AdminsTools.ChatSettings.PuchCommandSettings.puch_command_settings import PushCommandSettings
@@ -128,350 +114,219 @@ async def load_all_routers():
     from handlers.AdminsTools.ChatSettings.reports.reports import report
     from handlers.AdminsTools.ChatSettings.AlertsEdits.AlertsEdits import alerts
     from handlers.AdminsTools.ChatSettings.ChatAdmins.ChatAdmins import chatadmin
-    from handlers.AdminsTools.ChatSettings.DkCommands.UpdateCommandSettings import UpdateCommandsSetting
-
-    # UserCommands
-    from handlers.UserCommands.GenderSettings.GenderSettings import GenderSettings
+    from handlers.AdminsTools.ChatSettings.settings_link_filter.links_filter import link_filter
+    from handlers.UserCommands.SettingsUsersProfile.GenderSettings.GenderSettings import GenderSettings
     from handlers.UserCommands.user_profile import profile
-    from handlers.AgentsFeatures.payment.payment import sapphires_router
     from handlers.UserCommands.weather import weather_router
-
-    # Другие
+    from handlers.UserCommands.SettingsUsersProfile.PseudonymsUsers.PseudonymSettings import PseudonymRouter
+    from handlers.UserCommands.RPCommands import RP
+    from handlers.sanor_commands.CheckPremiumEmodji import CPE
     from handlers.testDirectiry.chat_settings import cs
     from handlers.testDirectiry.UpdateChatInfo import UpdatesChatInfo
     from handlers.BotAutomaticWork.AddChatsBot.AddChatsBot import chats
-
     from handlers.AdminsTools.ChatSettings.ChatSettingsAutomatic.ChatSettings import auto_chat_router
     from handlers.testDirectiry.testing import SlechCommands
+    from handlers.AdminsTools.ChatSettings.first_comment.first_comment import first_comment_commands_router
+    from handlers.UserCommands.sapphire_commands import sapphire_commands
+    #from handlers.AdminsTools.ChatSettings.voice_settings_chat.voice_settings import settings_voice
+    #from handlers.AdminsTools.ChatSettings.voice_settings_chat.voice_decoding import decoding
+    from handlers.AdminsTools.ChatSettings.first_comment.first_comment_auto import first_comment_auto_router
+    from handlers.AdminsTools.ChatSettings.captcha.captcha_main import captcha_router
+    from handlers.AdminsTools.ChatSettings.bundle.bundle_group import group_bundle
+    from handlers.AdminsTools.ChatSettings.bundle.bundle_private import private_bundle
+    from handlers.AdminsTools.ChatSettings.bundle.bundle_admins.bundle_admins import bundle_admins_router
+    from handlers.BotAutomaticWork.temporary_periodic_work.start_automatic_check_punishments import \
+        start_checking_punishments
+    from UserCommands.MarriageStrength.marriage_handlers import marriage
+    from UserCommands.payment.agents_payment import agent_sapphires_router
+    from UserCommands.payment.user_payment import user_sapphires_router
+    from UserCommands.online_privacy_commands import privacy_router
+    from AgentsFeatures.help_files.setting_help_online import setting_help_online
+    from AdminsTools.ChatSettings.DkCommands.UpdateCommandSettings import DkCommandsRouter
+    from AdminsTools.ChatSettings.chats_migrations.command_migration import migration_router
+    from AdminsTools.ChatSettings.rights_participation_cats.user_rights_management import tg_user_rights_management
+    from AdminsTools.ChatSettings.delete_message_chat import sms_cleanup
+    from sanor_commands.agents_chats_channel_filter import tg_channels_links_management
+
 
     return [
+        start_router, pingin, aa, server_stats_router, as_router,
+        check_text_agents_router, agent_admin_management, as_ignore_router,
+        ignore_router, ACSettings, tg_admin_management, tg_user_rights_management,
+        UCS, pin_sms,
+        notes_router, report_statistics, CVCM, bans, help_user,
+        chat_info_router, CUS, mute, PushCommandSettings, warn,
+        welcom, rul, report, alerts, chatadmin, DkCommandsRouter,
+        link_filter, GenderSettings, profile, migration_router,
+        weather_router, PseudonymRouter, RP, CPE, cs, UpdatesChatInfo,
+        chats, auto_chat_router, SlechCommands, first_comment_commands_router,
+        sapphire_commands, group_bundle, private_bundle,
+        bundle_admins_router, marriage, user_sapphires_router, agent_sapphires_router,
+        privacy_router, setting_help_online, sms_cleanup, tg_channels_links_management,
+        first_comment_auto_router, captcha_router, start_checking_punishments,
 
-        auto_chat_router,
-        sapphires_router,
-        weather_router,
-        pingin, aa, server_stats_router, as_router, check_text_agents_router,
-        agent_admin_management, as_ignore_router, ignore_router,
-        ACSettings, tg_admin_management, UCS, pin_sms,
-        notes_router, report_statistics, CVCM, CheckDk, bans, start_router,
-        CUS, mute,  PushCommandSettings, warn,  welcom, rul,  report,  alerts,
-        chatadmin,  UpdateCommandsSetting,  GenderSettings,  cs,
-        UpdatesChatInfo, SlechCommands, profile, captcha_router, chats
+        #decoding, settings_voice,
     ]
 
+async def initialize_global_services():
+    """Инициализация БД и тяжелых ресурсов при старте"""
+    logger.info("⚙️ Инициализация глобальных сервисов...")
 
-async def initialize_services():
-    """Инициализировать все сервисы"""
-    logger.info("🔄 Инициализация сервисов...")
+    from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import init_db_pool
+    from handlers.BotAutomaticWork.DataBase.CreateBD.CreateDataBase import create_db
+    from handlers.BotAutomaticWork.DataBase.CreateBD.CreateCommandBase import init_commands_structure
+    from handlers.BotAutomaticWork.DataBase.ConnectDataBase.ConnectDataBaseCache import init_cache
+    from handlers.BotAutomaticWork.Middleware.MiddlewareCache import init_ignore_cache
+    from handlers.BotAutomaticWork.Middleware.MiddlewareTimers import timer_manager
+    from handlers.BotAutomaticWork.Middleware.MiddlewareBackground import start_background_worker
+    from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.SmsStatsCleanerAutomatic import periodic_cleaner
+    from handlers.AdminsTools.ChatSettings.message_pinned.pin_sms import cleanup_expired_pins
+    from BotAutomaticWork.temporary_periodic_work.update_period_counter import reset_periodic_counters
+    from BotAutomaticWork.users.checks.check_users_status_online.check_online_statusDB import presence_cleanup_task_loop
 
+
+    await init_db_pool()
+    await create_db()
+    await init_cache()
+    await init_commands_structure()
+    await init_ignore_cache()
+    await timer_manager.start_batch_processing()
+    await start_background_worker()
+
+    # Запуск фоновых бесконечных задач в цикле событий
+    asyncio.create_task(periodic_cleaner())
+    asyncio.create_task(cleanup_expired_pins())
+    asyncio.create_task(reset_periodic_counters())
+    asyncio.create_task(presence_cleanup_task_loop())
+
+    logger.info("✅ Глобальные сервисы готовы")
+
+
+# --- УПРАВЛЕНИЕ БОТАМИ ---
+
+async def start_bot_instance(config: dict, routers: list):
+    """Запуск одного экземпляра бота с оптимизированной сессией"""
+    bot_token = config['TOKEN']
+    bot_id = config['id']
+    bot_name = config.get('name', f"Bot_{bot_id}")
+
+    # --- ОПТИМИЗАЦИЯ СЕРИАЛИЗАЦИИ JSON (orjson) ---
+    # --- ОПТИМИЗАЦИЯ СЕРИАЛИЗАЦИИ JSON ---
+    def json_dumps(data):
+        # orjson.dumps возвращает bytes, aiogram ожидает str
+        return orjson.dumps(data).decode('utf-8')
+
+    # Создаем сессию
+    session = AiohttpSession(
+        json_loads=orjson.loads,
+        json_dumps=json_dumps
+    )
+
+    # ВАЖНО: Проверим, создается ли бот вообще
     try:
-        # 1. Инициализируем UniversalBot
-        from handlers.BotAutomaticWork.universal_bot import bot as universal_bot
-        logger.info("✅ UniversalBot инициализирован")
-
-        # 2. Инициализируем БД и кэш
-        from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import init_db_pool
-        from handlers.BotAutomaticWork.DataBase.CreateDataBase import create_db
-        from handlers.BotAutomaticWork.DataBase.ConnectDataBase.ConnectDataBaseCache import init_cache
-        from handlers.BotAutomaticWork.DataBase.CreateDataBase import init_commands_structure
-
-        await init_db_pool()
-        await create_db()
-        await init_cache()
-        await init_commands_structure()
-
-        # 3. Инициализируем кэш игноров
-        from handlers.BotAutomaticWork.Middleware.MiddlewareCache import init_ignore_cache
-        await init_ignore_cache()
-
-        # 4. Запускаем фонового воркера
-        from handlers.BotAutomaticWork.Middleware.MiddlewareBackground import start_background_worker
-        await start_background_worker()
-
-        # 5. Автопроверка пингов
-        bot_instances_by_id = {}
-        for cfg in MultiBotConfig.BOTS:
-            bot = get_bot_by_token(cfg["TOKEN"])
-
-            if bot:
-                bot_instances_by_id[cfg["id"]] = bot
-        start_background_ping_monitor(bot_instances_by_id)
-        print(11)
-
-
-        # 5. Показываем активные чаты
-        from handlers.BotAutomaticWork.active_bot_registry import registry
-        active_chats = registry.get_all_chats()
-        if active_chats:
-            logger.info("📊 Активные чаты из active_bots.json:")
-            for chat_id, bot_id in active_chats.items():
-                logger.info(f"  Чат {chat_id} → бот {bot_id}")
-        else:
-            logger.info("📊 Активных чатов пока нет")
-
-        await init_commands_structure()
-        logger.info('бд оттрахана!')
-
-        asyncio.create_task(cleanup_expired_pins())
-        logger.info('проверка анпинов запущена!')
-
-        logger.info("✅ Все сервисы инициализированы")
-        return True
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка инициализации сервисов: {e}", exc_info=True)
-        return False
-
-
-async def shutdown_services():
-    """Завершить работу всех сервисов"""
-    logger.info("🛑 Завершение работы сервисов...")
-
-    try:
-        # 1. Останавливаем фонового воркера
-        from handlers.BotAutomaticWork.Middleware.MiddlewareBackground import stop_background_worker
-        await stop_background_worker()
-
-        # 2. Закрываем кэш игноров
-        from handlers.BotAutomaticWork.Middleware.MiddlewareCache import shutdown_ignore_cache
-        await shutdown_ignore_cache()
-
-        # 3. Сохраняем статистику сообщений
-        from handlers.AdminsTools.ChatSettings.Stats.msg_stats_users.msg_stats_cache import flush_cache_to_db
-        await flush_cache_to_db()
-        logger.info("💾 Статистика сообщений сохранена")
-
-        # 4. Закрываем UniversalBot
-        from handlers.BotAutomaticWork.universal_bot import bot as universal_bot
-
-        # Отправляем уведомление о выключении через UniversalBot
-        try:
-            await universal_bot.send_message(
-                chat_id=-1003346491683,  # Тот же чат для уведомлений
-                text='🛑 Бот выключен!\n\n'
-                     'Сервисы завершают работу...'
-            )
-        except Exception as e:
-            logger.warning(f"⚠️ Не удалось отправить уведомление о выключении: {e}")
-
-        await universal_bot.close_all()
-
-        # 5. Закрываем БД и кэш
-        from handlers.BotAutomaticWork.DataBase.ConnectDataBase.PoolConnectionPostgreSQL import close_db_pool
-        await close_db_pool()
-
-        # 6. Автопроверка пингов
-        stop_background_ping_monitor()
-
-
-        logger.info("✅ Все сервисы остановлены")
-
-    except Exception as e:
-        logger.error(f"❌ Ошибка при завершении работы: {e}")
-
-
-async def run_bot_instance(bot_config: dict):
-    """Запустить один экземпляр бота"""
-    bot_token = bot_config.get('TOKEN')
-    bot_id = bot_config.get('id')
-    bot_name = bot_config.get('name')
-
-    if not bot_token or not bot_id:
-        logger.error(f"❌ Некорректный конфиг: {bot_name}")
-        return
-
-    try:
-        logger.info(f"🚀 Подготовка бота: {bot_name}")
-
-        # 1. Перезагружаем хендлеры
-        await reload_all_handlers()
-
-        # 2. Загружаем роутеры
-        routers = await load_all_routers()
-
-        # 3. Создаём бота и диспетчер
         bot = Bot(
             token=bot_token,
-            default=DefaultBotProperties(parse_mode='HTML')
+            default=DefaultBotProperties(parse_mode='HTML'),
+            session=session
         )
+        logger.info(f"✅ Сессия для {bot_name} создана успешно")
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания бота {bot_name}: {e}")
+        return  # Выходим, если бот не создался
 
-        dp = Dispatcher(storage=MemoryStorage())
+    dp = Dispatcher(storage=MemoryStorage())
 
-        # 4. Регистрируем middleware
-        from handlers.BotAutomaticWork.Middleware.MiddlewareCore import UpdateChatUserMiddleware
-        from handlers.BotAutomaticWork.Middleware.MiddlewarePerformance import PerformanceMonitoringMiddleware
 
-        # Middleware для обновления active_bots.json
-        active_middleware = ActiveBotMiddleware(bot_id)
-        dp.update.middleware.register(active_middleware)
+    # Регистрация Middlewares (Порядок важен!)
+    from handlers.BotAutomaticWork.ActiveBotMiddleware import ActiveBotMiddleware
+    from handlers.BotAutomaticWork.Middleware.MiddlewareCore import UpdateChatUserMiddleware
+    from handlers.BotAutomaticWork.Middleware.PerformanceMonitoringMiddleware import PerformanceMonitoringMiddleware
+    from handlers.BotAutomaticWork.Middleware.GlobalCountersMiddleware import GlobalCountersMiddleware
 
-        # Middleware для обновления пользователей (передаём токен)
-        update_user_middleware = UpdateChatUserMiddleware(bot_token)
-        dp.update.middleware.register(update_user_middleware)
+    dp.update.middleware.register(ActiveBotMiddleware(bot_id))
+    dp.update.middleware.register(UpdateChatUserMiddleware(bot_token))
+    dp.message.outer_middleware.register(ForwardBlockerMiddleware(bot_name))
+    dp.update.middleware.register(PerformanceMonitoringMiddleware(alert_threshold=1.0))
+    dp.update.middleware.register(GlobalCountersMiddleware())
 
-        # Middleware для мониторинга производительности
-        performance_middleware = PerformanceMonitoringMiddleware(alert_threshold=1.0)
-        dp.update.middleware.register(performance_middleware)
+    # Подключаем роутеры
+    for router in routers:
+        dp.include_router(router)
 
-        # 5. Регистрируем все роутеры
-        for router in routers:
-            dp.include_router(router)
-
-        # 6. Получаем информацию о боте
+    try:
         bot_info = await bot.get_me()
-        logger.info(f"🤖 Бот {bot_name} запущен как @{bot_info.username}")
+        logger.info(f"🚀 Запущен @{bot_info.username} (ID: {bot_id})")
 
-        # 7. Отправляем уведомление о запуске
-        try:
-            await bot.send_message(
-                chat_id=-1003346491683,  # Ваш чат для уведомлений
-                text=f'✅ Бот запущен!\n'
-                     f'👤 @{bot_info.username}\n'
-            )
-        except Exception as e:
-            logger.warning(f"⚠️ Не удалось отправить уведомление о запуске: {e}")
-
-        # 8. Запускаем поллинг
-        logger.info(f"🔄 Начинаю поллинг для {bot_name}...")
         await dp.start_polling(
             bot,
             skip_updates=True,
-            allowed_updates=[
-                "message",
-                "callback_query",
-                "inline_query",
-                "chat_member",
-                "my_chat_member",
-                "chat_join_request"
-            ]
+            allowed_updates=[]
         )
-
     except Exception as e:
-        logger.error(f"❌ Критическая ошибка в боте {bot_name}: {e}", exc_info=True)
+        logger.error(f"💥 Ошибка в боте {bot_name}: {e}")
     finally:
-        if 'bot' in locals():
-            await bot.session.close()
-            logger.info(f"🔌 Бот {bot_name} остановлен")
+        await bot.session.close()
 
 
-# Добавьте этот импорт в начало файла
-import os
-import subprocess
+# --- ЖИЗНЕННЫЙ ЦИКЛ ПРИЛОЖЕНИЯ ---
 
-# Добавьте глобальные переменные после импортов
-RESTART_SERVER_FLAG = False
-RESTART_APP_FLAG = False
-current_process = None
-
-
-async def graceful_shutdown():
-    """Плавное завершение работы"""
-    logger.info("🛑 Плавное завершение работы...")
-    await shutdown_services()
-
-
-async def restart_application():
-    """Перезапуск приложения (только main.py)"""
-    global RESTART_APP_FLAG
-    logger.info("🔄 Запуск перезагрузки приложения...")
-    RESTART_APP_FLAG = True
-    await graceful_shutdown()
-
-
-async def restart_server():
-    """Перезагрузка сервера"""
-    global RESTART_SERVER_FLAG
-    logger.info("🔄 Запуск перезагрузки сервера...")
-    RESTART_SERVER_FLAG = True
-    await graceful_shutdown()
-
-
-async def handle_restart():
-    """Обработка перезагрузок после завершения работы"""
-    global RESTART_SERVER_FLAG, RESTART_APP_FLAG
-
-    if RESTART_SERVER_FLAG:
-        logger.info("🔁 Перезагрузка сервера...")
-        if os.name == 'posix':  # Linux/Unix
-            subprocess.run(["sudo", "reboot"])
-        else:
-            logger.warning("⚠️ Перезагрузка сервера поддерживается только на Linux")
-
-    elif RESTART_APP_FLAG:
-        logger.info("🔁 Перезапуск приложения...")
-        # Запускаем новый экземпляр
-        python = sys.executable
-        subprocess.Popen([python] + sys.argv)
+def restart_process():
+    """Полный перезапуск процесса (очищает всю память)"""
+    logger.info("🔄 Перезапуск процесса...")
+    python = sys.executable
+    os.execv(python, [python] + sys.argv)
 
 
 async def main():
-    """Главная функция"""
     from handlers.BotAutomaticWork.Gonfig.multi_bot_config import MultiBotConfig
 
-    logger.info("=" * 50)
-    logger.info(f"🚀 ЗАПУСК СИСТЕМЫ МНОГОБОТОВОСТИ (PID: {os.getpid()})")
-    logger.info("=" * 50)
-
-    # Проверяем конфигурацию
     if not MultiBotConfig.validate_config():
-        logger.error("❌ Невалидная конфигурация ботов!")
+        logger.error("❌ Ошибка конфигурации!")
         return
 
-    # Инициализируем сервисы
-    if not await initialize_services():
-        logger.error("❌ Не удалось инициализировать сервисы, завершаю работу...")
-        return
+    # 1. Глобальная инициализация
+    await initialize_global_services()
 
-    # Запускаем всех ботов
+    # 2. Предзагрузка роутеров (один раз в памяти)
+    routers = get_all_routers()
+
+    # 3. Запуск всех ботов
     tasks = []
-    for bot_config in MultiBotConfig.BOTS:
-        token = bot_config.get('TOKEN')
-        bot_id = bot_config.get('id')
+    for bot_cfg in MultiBotConfig.BOTS:
+        tasks.append(asyncio.create_task(start_bot_instance(bot_cfg, routers)))
+        await asyncio.sleep(0.5)  # Плавный запуск для снижения нагрузки на CPU
 
-        if token and bot_id:
-            task = asyncio.create_task(
-                run_bot_instance(bot_config),
-                name=f"bot_{bot_id}"
-            )
-            tasks.append(task)
+    logger.info(f"🟢 Система запущена. Ботов: {len(tasks)}")
 
-            # Небольшая пауза между запусками ботов
-            await asyncio.sleep(3)
+    # Обработка сигналов завершения
+    stop_event = asyncio.Event()
 
-    if not tasks:
-        logger.error("❌ Нет ботов для запуска!")
-        await shutdown_services()
-        return
+    def signal_handler():
+        logger.info("⚠️ Получен сигнал остановки...")
+        stop_event.set()
 
-    logger.info(f"✅ Запущено {len(tasks)} ботов")
-    logger.info("=" * 50)
-    logger.info("🟢 СИСТЕМА УСПЕШНО ЗАПУЩЕНА")
-    logger.info("=" * 50)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            asyncio.get_event_loop().add_signal_handler(sig, signal_handler)
+        except NotImplementedError:
+            pass  # Для Windows
 
-    # Обработка завершения (кросс-платформенная)
     try:
-        await asyncio.gather(*tasks)
-    except KeyboardInterrupt:
-        logger.info("")
-        logger.info("⏹️ Получен сигнал Ctrl+C, завершаю работу...")
-    except SystemExit:
-        logger.info("")
-        logger.info("⏹️ Получен сигнал завершения...")
-    except Exception as e:
-        logger.error(f"❌ Непредвиденная ошибка в основном цикле: {e}")
+        # Ждем либо отмены задач, либо сигнала остановки
+        await stop_event.wait()
     finally:
-        # Завершаем работу сервисов
-        await shutdown_services()
-
-        logger.info("")
-        logger.info("=" * 50)
-        logger.info("👋 СИСТЕМА ОСТАНОВЛЕНА")
-        logger.info("=" * 50)
+        logger.info("🛑 Завершение работы...")
+        # Здесь можно вызвать shutdown_services() если нужно
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info("👋 До свидания!")
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n👋 До свидания!")
+        pass
     except Exception as e:
-        logger.critical(f"💥 Критическая ошибка при запуске: {e}", exc_info=True)
+        logger.critical(f"Критический сбой: {e}", exc_info=True)
